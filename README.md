@@ -182,10 +182,10 @@ at it, or you'll lose your projects on each deploy.
    `DATABASE_PATH` must live under the volume mount path (`/data`). The DB and
    its schema/seed are created automatically on first boot. Don't set `PORT` —
    Railway injects it.
-4. **Expose the dashboard (optional).** If you set `DASHBOARD_PASSWORD`, the web
-   dashboard starts. On the service: *Settings → Networking → Generate Domain*
-   to get a public `https://…up.railway.app` URL. Open it and log in with the
-   password.
+4. **Expose the dashboard.** On the service: *Settings → Networking → Generate
+   Domain* to get a public `https://…up.railway.app` URL. Open it — if you
+   haven't set `DASHBOARD_PASSWORD` yet, the page tells you to; once it's set,
+   log in with it.
 5. **Deploy.** Railway builds and starts the service. Check the deploy logs for:
 
    ```
@@ -213,10 +213,9 @@ at it, or you'll lose your projects on each deploy.
   locally). Make sure exactly **one** instance runs. If a stuck deployment keeps
   conflicting, redeploy so only the newest is active, and don't reuse the same
   token across two services.
-- **Public domain only needed for the dashboard.** If you don't set
-  `DASHBOARD_PASSWORD`, no HTTP server starts and you don't need a domain. If you
-  do, generate a domain (step 4) — and use a **strong** password, since the URL
-  is public.
+- **Generate a domain to reach the dashboard.** The web server always listens,
+  but it's only reachable once you generate a domain (step 4). Set a **strong**
+  `DASHBOARD_PASSWORD` before exposing it, since the URL is public.
 - **Node is pinned to 20 (LTS).** `package.json` `engines` (`20.x`), `.nvmrc`,
   and `nixpacks.toml` all agree on Node 20 so `better-sqlite3` installs its
   **prebuilt binary** instead of compiling from source. (On newer Node majors
@@ -248,10 +247,13 @@ An optional web UI for editing **projects (tasks)** and **goals** from a browser
 Telegram. It runs in the same process as the bot and shares the same SQLite
 database, so edits show up immediately in `/today`, `/list`, etc.
 
-- **Opt-in & gated.** The server only starts when `DASHBOARD_PASSWORD` is set.
-  All `/api/*` routes require the password (sent as an `x-dashboard-password`
-  header); the static page itself holds no data. Use a strong password on
-  Railway since the URL is public, and rely on Railway's HTTPS.
+- **Always served, but gated.** The web server always starts (Railway needs a
+  listening port for its domain). All `/api/*` routes require the
+  `DASHBOARD_PASSWORD` (sent as an `x-dashboard-password` header). Until that
+  password is set, every API route returns `503` and the page shows a "set a
+  password" notice — no data is ever served unauthenticated (an empty password
+  can't authenticate). Use a strong password on Railway since the URL is public,
+  and rely on Railway's HTTPS.
 - **No build step.** The frontend is a single static `public/index.html`
   (vanilla HTML/CSS/JS). The backend is a small Express API in `src/server.ts`.
 - **What you can do:** view all projects with their live priority score; create,

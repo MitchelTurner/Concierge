@@ -158,8 +158,22 @@ export function createServer(config: Config): express.Express {
   const app = express();
   app.use(express.json());
 
+  // Public, unauthenticated: lets the frontend know whether a password has been
+  // configured so it can show the login screen vs a "set a password" notice.
+  app.get("/api/config", (_req, res) => {
+    res.json({ configured: config.dashboardPassword.length > 0 });
+  });
+
   // Auth gate for the API. The static shell is public (it holds no data).
   const requireAuth = (req: Request, res: Response, next: NextFunction): void => {
+    // No password configured → the dashboard is locked entirely (an empty
+    // password must never authenticate). Serve no data.
+    if (!config.dashboardPassword) {
+      res.status(503).json({
+        error: "Dashboard not configured. Set DASHBOARD_PASSWORD to enable it.",
+      });
+      return;
+    }
     const provided =
       (req.header("x-dashboard-password") ?? "").toString() ||
       (req.query.key ? String(req.query.key) : "");

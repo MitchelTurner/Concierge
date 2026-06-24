@@ -15,13 +15,13 @@ async function main(): Promise<void> {
   startScheduler(config, sendDailyMessage);
   startCheckinScheduler(config, sendCheckinMessage);
 
-  // Web dashboard is opt-in: only started when a password is configured, so
-  // it can never be exposed to the internet unauthenticated.
-  if (config.dashboardPassword) {
-    startServer(config);
-  } else {
+  // Always start the web server (Railway needs a listening port for its domain).
+  // The API stays fully locked until DASHBOARD_PASSWORD is set — without it,
+  // every /api route returns 503 and no data is served, so this is safe.
+  startServer(config);
+  if (!config.dashboardPassword) {
     console.log(
-      "[web] dashboard disabled (set DASHBOARD_PASSWORD to enable it)"
+      "[web] DASHBOARD_PASSWORD not set — dashboard is locked. Set it to log in and use the dashboard/AI agent."
     );
   }
 

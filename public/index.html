@@ -133,6 +133,21 @@
       </div>
     </div>
 
+    <div id="notconfig" class="hidden">
+      <div class="card" style="text-align:left">
+        <h1 style="text-align:center"><span class="sun">☀️</span> Operator</h1>
+        <p class="muted">The dashboard is running but <strong>locked</strong> — no password is set yet.</p>
+        <p class="muted">To use it, set a <code>DASHBOARD_PASSWORD</code> environment variable and redeploy:</p>
+        <ol class="muted" style="padding-left:18px">
+          <li>Railway → your service → <strong>Variables</strong></li>
+          <li>Add <code>DASHBOARD_PASSWORD</code> = a strong value</li>
+          <li>(Optional) add <code>ANTHROPIC_API_KEY</code> to enable the AI agent</li>
+          <li>Redeploy, then reload this page and log in</li>
+        </ol>
+        <button style="width:100%" onclick="location.reload()">Reload</button>
+      </div>
+    </div>
+
     <div id="app" class="hidden">
       <header>
         <h1><span class="sun">☀️</span> Operator <span class="muted" style="font-weight:400">dashboard</span></h1>
@@ -358,14 +373,22 @@
 
       function showApp() {
         $("login").classList.add("hidden");
+        $("notconfig").classList.add("hidden");
         $("app").classList.remove("hidden");
         Promise.all([loadGoals(), loadProjects()]).catch((e) => toast(e.message, true));
       }
 
       function showLogin() {
         $("app").classList.add("hidden");
+        $("notconfig").classList.add("hidden");
         $("login").classList.remove("hidden");
         $("login-pw").focus();
+      }
+
+      function showNotConfigured() {
+        $("app").classList.add("hidden");
+        $("login").classList.add("hidden");
+        $("notconfig").classList.remove("hidden");
       }
 
       function logout() {
@@ -501,8 +524,17 @@
 
       $("login-pw")?.addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
 
-      // Boot: try the stored password, else show login.
+      // Boot: if no password is configured server-side, show setup notice.
+      // Otherwise try the stored password, else show login.
       (async function () {
+        let cfg = { configured: true };
+        try {
+          cfg = await fetch("/api/config").then((r) => r.json());
+        } catch (_) { /* assume configured if the probe fails */ }
+        if (!cfg.configured) {
+          showNotConfigured();
+          return;
+        }
         if (pw) {
           try {
             await api("GET", "/session");
