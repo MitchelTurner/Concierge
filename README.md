@@ -41,6 +41,7 @@ score = (revenue_potential * confidence * speed) / max(effort_remaining, 1)
 - [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) — one local DB file
 - [`node-cron`](https://github.com/node-cron/node-cron) — scheduler
 - [`telegraf`](https://telegraf.js.org/) — Telegram bot
+- [`express`](https://expressjs.com/) — optional web dashboard API (vanilla HTML/JS frontend, no build step)
 - `dotenv` — config
 
 ## Setup
@@ -168,20 +169,28 @@ at it, or you'll lose your projects on each deploy.
    DAILY_TIME=07:30                      # local time of the daily nudge
    TZ=America/Chicago                    # MUST match DAILY_TIME's locale
    DATABASE_PATH=/data/operator.db       # <-- points the DB at the volume
+   DASHBOARD_PASSWORD=choose-a-strong-one # enables the web dashboard (see below)
    # ANTHROPIC_API_KEY=                  # Phase 2 only, leave unset
    ```
 
    `DATABASE_PATH` must live under the volume mount path (`/data`). The DB and
-   its schema/seed are created automatically on first boot.
-4. **Deploy.** Railway builds and starts the worker. Check the deploy logs for:
+   its schema/seed are created automatically on first boot. Don't set `PORT` —
+   Railway injects it.
+4. **Expose the dashboard (optional).** If you set `DASHBOARD_PASSWORD`, the web
+   dashboard starts. On the service: *Settings → Networking → Generate Domain*
+   to get a public `https://…up.railway.app` URL. Open it and log in with the
+   password.
+5. **Deploy.** Railway builds and starts the service. Check the deploy logs for:
 
    ```
    [db] ready
    [scheduler] daily nudge scheduled at 07:30 (America/Chicago) [cron: "30 7 * * *"]
+   [web] dashboard listening on port 8080
    [bot] online and listening for commands
    ```
 
-   Then message your bot `/today` to confirm it responds.
+   Then message your bot `/today` to confirm it responds, and open the domain
+   to edit projects/goals.
 
 ### Notes & gotchas
 
@@ -190,8 +199,10 @@ at it, or you'll lose your projects on each deploy.
 - **One replica only.** Keep `numReplicas: 1` (already set in `railway.json`).
   Two instances would double-send the daily message and both long-poll the same
   bot. SQLite is single-file and not meant for concurrent writers either.
-- **No public domain needed.** Don't bother generating a domain or exposing a
-  port — this service doesn't listen for HTTP.
+- **Public domain only needed for the dashboard.** If you don't set
+  `DASHBOARD_PASSWORD`, no HTTP server starts and you don't need a domain. If you
+  do, generate a domain (step 4) — and use a **strong** password, since the URL
+  is public.
 - **Node is pinned to 20 (LTS).** `package.json` `engines` (`20.x`), `.nvmrc`,
   and `nixpacks.toml` all agree on Node 20 so `better-sqlite3` installs its
   **prebuilt binary** instead of compiling from source. (On newer Node majors
@@ -213,6 +224,38 @@ ignored.
 | `/done {id}` | Mark the current next action complete, then prompt for the new one |
 | `/status {id} {status}` | Update status (`idea`/`active`/`blocked`/`shipped`/`paid`/`archived`) |
 | `/cancel` | Abort an in-progress `/add` or `/done` follow-up |
+
+## Web dashboard
+
+An optional web UI for editing **projects (tasks)** and **goals** from a browser
+— handy when you want to bulk-edit or write longer notes than is comfortable in
+Telegram. It runs in the same process as the bot and shares the same SQLite
+database, so edits show up immediately in `/today`, `/list`, etc.
+
+- **Opt-in & gated.** The server only starts when `DASHBOARD_PASSWORD` is set.
+  All `/api/*` routes require the password (sent as an `x-dashboard-password`
+  header); the static page itself holds no data. Use a strong password on
+  Railway since the URL is public, and rely on Railway's HTTPS.
+- **No build step.** The frontend is a single static `public/index.html`
+  (vanilla HTML/CSS/JS). The backend is a small Express API in `src/server.ts`.
+- **What you can do:** view all projects with their live priority score; create,
+  edit every field of, and delete projects; and create/edit/delete goals.
+
+Run locally:
+
+```bash
+DASHBOARD_PASSWORD=dev npm run dev
+# then open http://localhost:3000 and log in with "dev"
+```
+
+API (all require the `x-dashboard-password` header):
+
+| Method & path | Purpose |
+| --- | --- |
+| `GET /api/projects` · `POST /api/projects` | List / create projects |
+| `PATCH /api/projects/:id` · `DELETE /api/projects/:id` | Edit / delete a project |
+| `GET /api/goals` · `POST /api/goals` | List / create goals |
+| `PATCH /api/goals/:id` · `DELETE /api/goals/:id` | Edit / delete a goal |
 
 ## Daily message format
 
@@ -243,9 +286,12 @@ operator/
     messages.ts    # daily message + list formatting (shared by bot & scheduler)
     bot.ts         # telegraf commands
     scheduler.ts   # node-cron -> allocateDay() -> send
+    server.ts      # express API for the web dashboard (auth + projects/goals CRUD)
     config.ts      # load + validate env
-    index.ts       # boot: init db, start bot, start scheduler
+    index.ts       # boot: init db, start bot, scheduler, web server
     daily.ts       # one-shot allocation + send + exit (npm run daily)
+  public/
+    index.html     # web dashboard (vanilla HTML/CSS/JS, no build step)
   data/
     operator.db    # gitignored, auto-created
   .env.example
@@ -279,11 +325,22 @@ Table `projects`:
 | `created_at` | TEXT | ISO datetime |
 | `updated_at` | TEXT | ISO datetime |
 
+Table `goals` (edited from the web dashboard):
+
+| column | type | notes |
+| --- | --- | --- |
+| `id` | INTEGER | PK autoincrement |
+| `title` | TEXT | required |
+| `detail` | TEXT | nullable |
+| `created_at` | TEXT | ISO datetime |
+| `updated_at` | TEXT | ISO datetime |
+
 ## Roadmap (not built yet)
 
 - **Phase 2:** Anthropic-powered prioritization (`claude-sonnet-4-6`), evening
   check-in + `daily_log` table, `/time {minutes}` to tailor suggestions.
-- **Phase 3:** Weekly review summary, calendar awareness, optional read-only web
-  dashboard.
+- **Phase 3:** Weekly review summary, calendar awareness. (An editable web
+  dashboard — beyond the originally-planned read-only one — is already built; see
+  [Web dashboard](#web-dashboard).)
 
-These are intentionally **not** implemented in Phase 1.
+The Phase 2/3 items above are intentionally **not** implemented yet.

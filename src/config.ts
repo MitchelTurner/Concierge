@@ -26,6 +26,13 @@ export interface Config {
   tz: string;
   /** Phase 2 only — may be empty in Phase 1. */
   anthropicApiKey: string;
+  /** HTTP port for the web dashboard (Railway sets PORT). */
+  port: number;
+  /**
+   * Password gating the web dashboard. When empty, the web server is NOT
+   * started — so the dashboard is never exposed unauthenticated.
+   */
+  dashboardPassword: string;
 }
 
 const DAILY_TIME_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
@@ -65,12 +72,22 @@ export function loadConfig(): Config {
   const tz = (process.env.TZ ?? "America/Chicago").trim();
   const anthropicApiKey = (process.env.ANTHROPIC_API_KEY ?? "").trim();
 
+  const portRaw = (process.env.PORT ?? "3000").trim();
+  const port = Number(portRaw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`PORT must be a valid port number (got "${portRaw}").`);
+  }
+
+  const dashboardPassword = (process.env.DASHBOARD_PASSWORD ?? "").trim();
+
   return {
     telegramBotToken,
     telegramChatId,
     dailyTime,
     tz,
     anthropicApiKey,
+    port,
+    dashboardPassword,
   };
 }
 

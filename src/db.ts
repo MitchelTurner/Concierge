@@ -39,6 +39,33 @@ export interface Project {
   updated_at: string; // ISO datetime
 }
 
+/** A high-level goal that frames why the projects matter. */
+export interface Goal {
+  id: number;
+  title: string;
+  detail: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Project columns that may be edited from the dashboard. */
+export const PROJECT_EDITABLE_COLUMNS = [
+  "name",
+  "type",
+  "client",
+  "revenue_potential",
+  "confidence",
+  "time_to_cash",
+  "effort_remaining",
+  "status",
+  "next_action",
+  "deadline",
+  "notes",
+] as const;
+
+export type ProjectEditableColumn = (typeof PROJECT_EDITABLE_COLUMNS)[number];
+export type ProjectPatch = Partial<Pick<Project, ProjectEditableColumn>>;
+
 /** Fields a caller may provide when inserting a new project. */
 export interface NewProject {
   name: string;
@@ -76,6 +103,16 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 `;
 
+const GOALS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS goals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  detail TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`;
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -98,8 +135,10 @@ export function initDb(): Database.Database {
   db = new Database(DB_PATH);
   db.pragma("journal_mode = WAL");
   db.exec(SCHEMA);
+  db.exec(GOALS_SCHEMA);
 
   seedIfEmpty(db);
+  seedGoalIfEmpty(db);
   return db;
 }
 
@@ -202,6 +241,25 @@ function seedIfEmpty(database: Database.Database): void {
   insertMany(seeds);
 }
 
+function seedGoalIfEmpty(database: Database.Database): void {
+  const { count } = database
+    .prepare("SELECT COUNT(*) AS count FROM goals")
+    .get() as { count: number };
+  if (count > 0) return;
+
+  const ts = nowIso();
+  database
+    .prepare(
+      "INSERT INTO goals (title, detail, created_at, updated_at) VALUES (?, ?, ?, ?)"
+    )
+    .run(
+      "Go full-time as a dev as fast as possible",
+      "Combine fast client income with passive products. Prioritize cash now; let passive compound.",
+      ts,
+      ts
+    );
+}
+
 export function getActiveProjects(): Project[] {
   return getDb()
     .prepare("SELECT * FROM projects WHERE status = 'active' ORDER BY id")
@@ -270,6 +328,86 @@ export function clearNextAction(id: number): boolean {
   const result = getDb()
     .prepare("UPDATE projects SET next_action = NULL, updated_at = ? WHERE id = ?")
     .run(nowIso(), id);
+  return result.changes > 0;
+}
+
+/**
+ * Apply a partial update to a project. Only whitelisted columns are written.
+ * Returns the updated project, or undefined if the id doesn't exist.
+ */
+export function updateProject(id: number, patch: ProjectPatch): Project | undefined {
+  const keys = (Object.keys(patch) as ProjectEditableColumn[]).filter((k) =>
+    PROJECT_EDITABLE_COLUMNS.includes(k)
+  );
+  if (keys.length === 0) return getProject(id);
+
+  const setClause = keys.map((k) => `${k} = @${k}`).join(", ");
+  const params: Record<string, unknown> = { id, updated_at: nowIso() };
+  for (const k of keys) {
+    params[k] = patch[k] ?? null;
+  }
+
+  const result = getDb()
+    .prepare(
+      `UPDATE projects SET ${setClause}, updated_at = @updated_at WHERE id = @id`
+    )
+    .run(params);
+  return result.changes > 0 ? getProject(id) : undefined;
+}
+
+export function deleteProject(id: number): boolean {
+  const result = getDb().prepare("DELETE FROM projects WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+export function getGoals(): Goal[] {
+  return getDb()
+    .prepare("SELECT * FROM goals ORDER BY id")
+    .all() as Goal[];
+}
+
+export function getGoal(id: number): Goal | undefined {
+  return getDb()
+    .prepare("SELECT * FROM goals WHERE id = ?")
+    .get(id) as Goal | undefined;
+}
+
+export function addGoal(title: string, detail: string | null = null): Goal {
+  const ts = nowIso();
+  const result = getDb()
+    .prepare(
+      "INSERT INTO goals (title, detail, created_at, updated_at) VALUES (?, ?, ?, ?)"
+    )
+    .run(title, detail, ts, ts);
+  return getGoal(Number(result.lastInsertRowid))!;
+}
+
+export function updateGoal(
+  id: number,
+  patch: { title?: string; detail?: string | null }
+): Goal | undefined {
+  const sets: string[] = [];
+  const params: Record<string, unknown> = { id, updated_at: nowIso() };
+  if (patch.title !== undefined) {
+    sets.push("title = @title");
+    params.title = patch.title;
+  }
+  if (patch.detail !== undefined) {
+    sets.push("detail = @detail");
+    params.detail = patch.detail ?? null;
+  }
+  if (sets.length === 0) return getGoal(id);
+
+  const result = getDb()
+    .prepare(
+      `UPDATE goals SET ${sets.join(", ")}, updated_at = @updated_at WHERE id = @id`
+    )
+    .run(params);
+  return result.changes > 0 ? getGoal(id) : undefined;
+}
+
+export function deleteGoal(id: number): boolean {
+  const result = getDb().prepare("DELETE FROM goals WHERE id = ?").run(id);
   return result.changes > 0;
 }
 

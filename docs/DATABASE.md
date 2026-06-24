@@ -60,6 +60,19 @@ unset                ->  defaults to <project>/data/operator.db
 `type` and `status` are enforced with `CHECK` constraints. WAL journal mode is
 enabled for safer concurrent reads.
 
+### Schema (table `goals`)
+
+High-level goals that frame why the projects matter, edited from the web
+dashboard. Seeded with one example on first run.
+
+| column | type | notes |
+| --- | --- | --- |
+| `id` | INTEGER | PK autoincrement |
+| `title` | TEXT | required |
+| `detail` | TEXT | nullable |
+| `created_at` | TEXT | ISO datetime |
+| `updated_at` | TEXT | ISO datetime |
+
 ## Why SQLite (and not Postgres)
 
 For this app SQLite is the right tool, not a compromise:

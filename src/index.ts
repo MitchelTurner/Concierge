@@ -2,6 +2,7 @@ import { loadConfig } from "./config.js";
 import { initDb } from "./db.js";
 import { createBot } from "./bot.js";
 import { startScheduler } from "./scheduler.js";
+import { startServer } from "./server.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -12,6 +13,16 @@ async function main(): Promise<void> {
   const { bot, sendDailyMessage } = createBot(config);
 
   startScheduler(config, sendDailyMessage);
+
+  // Web dashboard is opt-in: only started when a password is configured, so
+  // it can never be exposed to the internet unauthenticated.
+  if (config.dashboardPassword) {
+    startServer(config);
+  } else {
+    console.log(
+      "[web] dashboard disabled (set DASHBOARD_PASSWORD to enable it)"
+    );
+  }
 
   // Launch the bot (long-running). launch() resolves only when the bot stops,
   // so we don't await it here; we only catch a failed startup (e.g. bad token).
