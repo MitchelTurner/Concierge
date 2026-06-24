@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
-import { DB_PATH, DB_USES_RAILWAY_DEFAULT } from "./config.js";
+import { DB_PATH, DB_USES_RAILWAY_DEFAULT, isRailway, shouldSeedDemoData } from "./config.js";
 
 export type ProjectType = "fast" | "passive";
 export type ProjectStatus =
@@ -170,12 +170,37 @@ export function initDb(): Database.Database {
 
   seedOnFirstRun(db);
 
+  const { projectCount, goalCount } = db
+    .prepare(
+      `SELECT
+        (SELECT COUNT(*) FROM projects) AS projectCount,
+        (SELECT COUNT(*) FROM goals) AS goalCount`
+    )
+    .get() as { projectCount: number; goalCount: number };
+
   console.log(`[db] using ${DB_PATH}${dbExisted ? "" : " (new file)"}`);
+  console.log(`[db] loaded ${projectCount} project(s), ${goalCount} goal(s)`);
+
+  if (isRailway()) {
+    const onVolume = path.dirname(DB_PATH).startsWith("/data");
+    if (!onVolume) {
+      console.error(
+        `[db] DATABASE_PATH="${DB_PATH}" is not on /data — on Railway your database ` +
+          `must live on a persistent volume (e.g. /data/operator.db) or data is ` +
+          `wiped on every deploy.`
+      );
+    } else if (!dbExisted) {
+      console.error(
+        "[db] New database file on Railway. If this happens after every deploy, " +
+          "attach a persistent volume mounted at /data and set DATABASE_PATH=/data/operator.db."
+      );
+    }
+  }
+
   if (DB_USES_RAILWAY_DEFAULT) {
     console.log(
       "[db] Railway detected — database defaults to /data/operator.db. " +
-        "Attach a persistent volume mounted at /data or set DATABASE_PATH, " +
-        "otherwise all data is wiped on every deploy."
+        "Attach a persistent volume mounted at /data or set DATABASE_PATH."
     );
   }
 
@@ -245,9 +270,15 @@ function seedOnFirstRun(database: Database.Database): void {
     .get() as { projectCount: number; goalCount: number };
 
   // Fresh install only — never re-seed because a table was later emptied.
-  if (projectCount === 0 && goalCount === 0) {
+  if (projectCount === 0 && goalCount === 0 && shouldSeedDemoData()) {
     seedProjects(database);
     seedGoals(database);
+    console.log("[db] inserted demo projects/goals (local onboarding)");
+  } else if (projectCount === 0 && goalCount === 0 && isRailway()) {
+    console.log(
+      "[db] empty database — demo seed skipped on Railway. " +
+        "Set SEED_DEMO_DATA=true only if you want sample rows."
+    );
   }
 
   // Mark seeded for existing databases too so upgrades don't insert demo rows.
@@ -558,9 +589,14 @@ export function deleteGoal(id: number): boolean {
   return result.changes > 0;
 }
 
-/** For tests/scripts: close the underlying handle. */
+/** For tests/scripts: close the underlying handle and flush WAL to disk. */
 export function closeDb(): void {
   if (db) {
+    try {
+      db.pragma("wal_checkpoint(TRUNCATE)");
+    } catch {
+      // Best-effort flush before exit.
+    }
     db.close();
     db = null;
   }

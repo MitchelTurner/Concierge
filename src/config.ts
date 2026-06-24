@@ -6,11 +6,20 @@ loadDotenv();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** True when running on Railway (or a Railway-compatible host). */
+export function isRailway(): boolean {
+  return Boolean(
+    process.env.RAILWAY_ENVIRONMENT ||
+      process.env.RAILWAY_PROJECT_ID ||
+      process.env.RAILWAY_SERVICE_ID
+  );
+}
+
 /**
  * Absolute path to the SQLite database file.
  *
  * Resolution order:
- * 1. `DATABASE_PATH` env var when set
+ * 1. `DATABASE_PATH` env var when set (relative paths on Railway resolve under `/data`)
  * 2. `/data/operator.db` on Railway (expects a persistent volume at `/data`)
  * 3. `<project>/data/operator.db` for local development
  *
@@ -19,14 +28,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  */
 function resolveDbPath(): string {
   const explicit = process.env.DATABASE_PATH?.trim();
-  if (explicit) return path.resolve(explicit);
+  if (explicit) {
+    if (path.isAbsolute(explicit)) return path.resolve(explicit);
+    // Relative paths on Railway almost always mean a misconfigured deploy
+    // (ephemeral app dir). Force them onto the volume mount.
+    if (isRailway()) return path.resolve("/data", explicit);
+    return path.resolve(explicit);
+  }
 
-  const onRailway = Boolean(
-    process.env.RAILWAY_ENVIRONMENT ||
-      process.env.RAILWAY_PROJECT_ID ||
-      process.env.RAILWAY_SERVICE_ID
-  );
-  if (onRailway) return path.resolve("/data/operator.db");
+  if (isRailway()) return path.resolve("/data/operator.db");
 
   return path.resolve(__dirname, "..", "data", "operator.db");
 }
@@ -35,12 +45,18 @@ export const DB_PATH = resolveDbPath();
 
 /** True when running on Railway without an explicit DATABASE_PATH override. */
 export const DB_USES_RAILWAY_DEFAULT =
-  !process.env.DATABASE_PATH?.trim() &&
-  Boolean(
-    process.env.RAILWAY_ENVIRONMENT ||
-      process.env.RAILWAY_PROJECT_ID ||
-      process.env.RAILWAY_SERVICE_ID
-  );
+  !process.env.DATABASE_PATH?.trim() && isRailway();
+
+/**
+ * Whether to insert the built-in demo projects/goals on a fresh database.
+ * Default: on locally only. On Railway/production, never — unless explicitly enabled.
+ */
+export function shouldSeedDemoData(): boolean {
+  const flag = process.env.SEED_DEMO_DATA?.trim().toLowerCase();
+  if (flag === "true") return true;
+  if (flag === "false") return false;
+  return !isRailway();
+}
 
 export interface Config {
   telegramBotToken: string;

@@ -108,9 +108,10 @@ npm run dev      # with auto-reload while developing
 npm start        # plain run
 ```
 
-On first run the database auto-creates at `data/operator.db` and is seeded with
-example projects (2 fast, 2 passive) so you can see it work immediately, then
-edit/replace them.
+On first run the database auto-creates at `data/operator.db`. Locally it is
+seeded with example projects (2 fast, 2 passive) unless `SEED_DEMO_DATA=false`.
+**On Railway, demo seed is disabled** — you start empty. Attach a volume at
+`/data` and set `DATABASE_PATH=/data/operator.db` or data is lost on every deploy.
 
 ### One-shot (for GitHub Actions cron)
 
