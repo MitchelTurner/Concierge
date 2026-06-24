@@ -199,6 +199,14 @@ at it, or you'll lose your projects on each deploy.
 - **One replica only.** Keep `numReplicas: 1` (already set in `railway.json`).
   Two instances would double-send the daily message and both long-poll the same
   bot. SQLite is single-file and not meant for concurrent writers either.
+- **`409: Conflict` from Telegram = two instances polling the same token.**
+  Only one process may long-poll a bot at a time. Causes: an overlapping deploy
+  still shutting down (transient — the boot now retries with backoff and the web
+  dashboard stays up regardless), a duplicate Railway service/deployment using
+  the same `TELEGRAM_BOT_TOKEN`, or the bot also running somewhere else (e.g.
+  locally). Make sure exactly **one** instance runs. If a stuck deployment keeps
+  conflicting, redeploy so only the newest is active, and don't reuse the same
+  token across two services.
 - **Public domain only needed for the dashboard.** If you don't set
   `DASHBOARD_PASSWORD`, no HTTP server starts and you don't need a domain. If you
   do, generate a domain (step 4) — and use a **strong** password, since the URL

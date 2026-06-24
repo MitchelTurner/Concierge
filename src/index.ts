@@ -24,20 +24,40 @@ async function main(): Promise<void> {
     );
   }
 
-  // Launch the bot (long-running). launch() resolves only when the bot stops,
-  // so we don't await it here; we only catch a failed startup (e.g. bad token).
-  bot
-    .launch(() => {
-      console.log("[bot] online and listening for commands");
-    })
-    .catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[bot] failed to launch: ${msg}`);
-      console.error(
-        "Check TELEGRAM_BOT_TOKEN is correct (from @BotFather). See README."
-      );
-      process.exit(1);
-    });
+  // Launch the bot (long-running). A launch failure must NOT take down the web
+  // dashboard, so we never exit the process here — we log and, for transient
+  // errors (e.g. a 409 Conflict during an overlapping deploy), retry with
+  // backoff. dropPendingUpdates clears any stale getUpdates offset.
+  let attempt = 0;
+  const launchBot = (): void => {
+    attempt += 1;
+    bot
+      .launch({ dropPendingUpdates: true }, () => {
+        console.log("[bot] online and listening for commands");
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        const isConflict = /\b409\b/.test(msg) || /conflict/i.test(msg);
+        const isAuth = /\b401\b/.test(msg) || /unauthorized/i.test(msg);
+        console.error(`[bot] failed to launch (attempt ${attempt}): ${msg}`);
+
+        if (isAuth) {
+          console.error(
+            "[bot] TELEGRAM_BOT_TOKEN looks wrong (from @BotFather). Not retrying; the web dashboard stays up."
+          );
+          return;
+        }
+        if (isConflict) {
+          console.error(
+            "[bot] 409 = another instance is polling this token. Usually an overlapping Railway deploy still shutting down, or a duplicate service/deployment. Ensure only ONE instance runs."
+          );
+        }
+        const delaySec = Math.min(60, 2 ** Math.min(attempt, 5));
+        console.error(`[bot] retrying in ${delaySec}s (web dashboard unaffected)...`);
+        setTimeout(launchBot, delaySec * 1000);
+      });
+  };
+  launchBot();
 
   const shutdown = (signal: string) => {
     console.log(`\n[operator] received ${signal}, shutting down...`);
