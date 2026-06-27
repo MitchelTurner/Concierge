@@ -1,7 +1,7 @@
 {
-  "name": "manoverboard",
+  "name": "concierge",
   "version": "0.2.0",
-  "description": "manoverboard.ai — one clear priority for your side hustle. Cron job + Postgres + Telegram bot + dashboard.",
+  "description": "Concierge — one clear priority for your side hustle. Cron job + Postgres + Telegram bot + dashboard.",
   "type": "module",
   "license": "MIT",
   "repository": {

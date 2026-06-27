@@ -1,6 +1,6 @@
 # Database
 
-manoverboard.ai uses **PostgreSQL** for multi-user SaaS: row-level isolation per account,
+Concierge uses **PostgreSQL** for multi-user SaaS: row-level isolation per account,
 session auth, and a central database shared across app instances.
 
 ## TL;DR

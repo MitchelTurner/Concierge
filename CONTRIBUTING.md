@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in **manoverboard.ai**. This project is a focused side-hustle assistant — cron + Postgres + Telegram + a small web dashboard — and contributions that keep it simple are welcome.
+Thanks for your interest in **Concierge**. This project is a focused side-hustle assistant — cron + Postgres + Telegram + a small web dashboard — and contributions that keep it simple are welcome.
 
 ## Getting started
 

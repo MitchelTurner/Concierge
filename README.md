@@ -1,4 +1,4 @@
-# manoverboard.ai
+# Concierge
 
 [![Node 20](https://img.shields.io/badge/node-20.x-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -83,7 +83,7 @@ npm install
 Locally, run Postgres (Docker example):
 
 ```bash
-docker run -d --name manoverboard-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
+docker run -d --name concierge-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
 export DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres
 export DATABASE_SSL=false
 ```
@@ -173,7 +173,7 @@ jobs:
 
 ## Deploy to Railway (recommended host)
 
-manoverboard.ai is a long-running process: Telegram bot (long polling), per-user
+Concierge is a long-running process: Telegram bot (long polling), per-user
 scheduler, and web dashboard. [Railway](https://railway.com) runs this well. The
 repo ships `railway.json` so the service builds with Nixpacks and runs `npm start`.
 
@@ -309,7 +309,7 @@ Passive projects: quietly letting them rot is how they die.
 
 ## Progress-based accountability
 
-manoverboard.ai tracks momentum, not just priority — it works for any project type
+Concierge tracks momentum, not just priority — it works for any project type
 (client sites, sales, passive products), not just code.
 
 - **Progress stamping.** Every project has a `last_progress_at` timestamp. It's
@@ -331,7 +331,7 @@ manoverboard.ai tracks momentum, not just priority — it works for any project 
 ## Project structure
 
 ```
-manoverboard/
+concierge/
   src/
     index.ts       # entry: boot DB, bot, scheduler, web server
     config.ts      # load + validate env

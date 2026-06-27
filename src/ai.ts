@@ -340,7 +340,7 @@ export async function buildSystemPrompt(userId: number): Promise<string> {
   const lines: string[] = [];
 
   lines.push(
-    "You are the AI assistant for manoverboard.ai — a personal assistant and business analyst for a solo developer building a freelance/dev business on the side of a full-time job.",
+    "You are the AI assistant for Concierge — a personal assistant and business analyst for a solo developer building a freelance/dev business on the side of a full-time job.",
     "",
     "How you think:",
     "- The user is time-poor: ~1 hour on weeknights, more on weekends. Keep suggestions realistic for that.",

@@ -68,13 +68,13 @@ function parseHours(text: string): number | null {
   return Math.round(n);
 }
 
-export interface OperatorBot {
+export interface ConciergeBot {
   bot: Telegraf;
   sendDailyMessage: (user: User) => Promise<void>;
   sendCheckinMessage: (user: User) => Promise<void>;
 }
 
-export function createBot(config: Config): OperatorBot {
+export function createBot(config: Config): ConciergeBot {
   const bot = new Telegraf(config.telegramBotToken);
   const sessions = new Map<string, Session>();
 
@@ -87,7 +87,7 @@ export function createBot(config: Config): OperatorBot {
     if (!user) {
       await ctx.reply(
         "Your Telegram isn't linked yet.\n\n" +
-          "1. Sign up at the manoverboard.ai dashboard\n" +
+          "1. Sign up at the Concierge dashboard\n" +
           "2. Open Settings → generate a link code\n" +
           "3. Send /link YOUR_CODE here"
       );
@@ -101,7 +101,7 @@ export function createBot(config: Config): OperatorBot {
     if (!user) return;
     await ctx.reply(
       [
-        "\u2693 manoverboard.ai is online.",
+        "\u2693 Concierge is online.",
         "",
         "Commands:",
         "/today — today's focus",

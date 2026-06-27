@@ -1,6 +1,6 @@
 # Architecture
 
-High-level map of how **manoverboard.ai** runs as a single Node process.
+High-level map of how **Concierge** runs as a single Node process.
 
 ## Runtime overview
 

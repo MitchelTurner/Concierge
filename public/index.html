@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
-    <title>manoverboard.ai — Dashboard</title>
+    <title>Concierge — Dashboard</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
@@ -872,7 +872,7 @@
       <div class="auth-screen">
         <div class="auth-card">
           <div class="brand-icon"><svg><use href="#icon-life-ring"/></svg></div>
-          <h1 class="brand-name">manoverboard<span class="tld">.ai</span></h1>
+          <h1 class="brand-name">Concierge</h1>
           <p class="tagline">One clear priority for your side hustle.</p>
           <div id="auth-signin">
             <p>Sign in to your account.</p>
@@ -898,7 +898,7 @@
       <header>
         <div class="brand">
           <div class="brand-icon"><svg><use href="#icon-life-ring"/></svg></div>
-          <h1>manoverboard<span class="tld">.ai</span><span class="sub">dashboard</span></h1>
+          <h1>Concierge<span class="sub">dashboard</span></h1>
         </div>
         <button class="ghost" onclick="logout()">
           <svg><use href="#icon-logout"/></svg>
@@ -1013,8 +1013,8 @@
     <div id="toast" class="toast"></div>
 
     <script>
-      const TOKEN_KEY = "manoverboard_token";
-      let token = localStorage.getItem(TOKEN_KEY) || "";
+      const TOKEN_KEY = "concierge_token";
+      let token = localStorage.getItem(TOKEN_KEY) || localStorage.getItem("manoverboard_token") || "";
       let currentUser = null;
 
       const $ = (id) => document.getElementById(id);
