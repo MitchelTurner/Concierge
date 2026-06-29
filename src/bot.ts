@@ -9,6 +9,7 @@ import { Telegraf } from "telegraf";
 import { message } from "telegraf/filters";
 import type { Config } from "./config.js";
 import {
+  addCallNote,
   addProject,
   addProjectTask,
   addDailyLog,
@@ -87,6 +88,7 @@ export function createBot(config: Config): ConciergeBot {
         "/next {id} {task} — add a task to an idea",
         "/done {id} — complete the next open task",
         "/progress {id} [note] — log progress on an idea",
+        "/call {id} {contact} — {note} — log a phone call (id optional)",
         "/status {id} {status} — update idea status",
         "/unlink — disconnect this Telegram from your account",
       ].join("\n")
@@ -229,6 +231,55 @@ export function createBot(config: Config): ConciergeBot {
     await ctx.reply(
       `\u2705 Logged progress on #${id} (${idea.name}).${note ? " Note saved." : ""}`
     );
+  });
+
+  bot.command("call", async (ctx) => {
+    const user = await requireLinkedUser(ctx);
+    if (!user) return;
+    const rest = stripCommand(ctx.message.text).trim();
+    if (!rest) {
+      await ctx.reply(
+        "Usage:\n/call {contact} — {note}\n/call {id} {contact} — {note}\n\nExample: /call 2 Jane Doe — interested, follow up Friday"
+      );
+      return;
+    }
+
+    let projectId: number | null = null;
+    let remainder = rest;
+
+    const idMatch = /^(\d+)\s+(.+)$/.exec(rest);
+    if (idMatch) {
+      projectId = Number(idMatch[1]);
+      remainder = idMatch[2].trim();
+      const idea = await getProjectWithTasks(user.id, projectId);
+      if (!idea) {
+        await ctx.reply(`No idea with id ${projectId}.`);
+        return;
+      }
+    }
+
+    const dashIdx = remainder.indexOf(" — ");
+    let contactName: string | null = null;
+    let note = remainder;
+    if (dashIdx >= 0) {
+      contactName = remainder.slice(0, dashIdx).trim() || null;
+      note = remainder.slice(dashIdx + 3).trim();
+    }
+
+    if (!note) {
+      await ctx.reply("Include a note after — . Example: /call Jane Doe — left voicemail, try again tomorrow");
+      return;
+    }
+
+    await addCallNote(user.id, {
+      project_id: projectId,
+      contact_name: contactName,
+      note,
+    });
+
+    const linked = projectId ? ` (linked to #${projectId})` : "";
+    const who = contactName ? ` with ${contactName}` : "";
+    await ctx.reply(`\u2705 Call note saved${who}${linked}.`);
   });
 
   bot.command("skip", async (ctx) => {

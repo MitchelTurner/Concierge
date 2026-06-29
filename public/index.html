@@ -780,6 +780,74 @@
 
       .goal .card-actions { margin-top: 12px; padding-top: 12px; }
 
+      /* ── Call notes ── */
+      .call-note-form {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 18px 20px;
+        margin-bottom: 16px;
+        backdrop-filter: blur(12px);
+      }
+
+      .call-note-form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      @media (max-width: 720px) {
+        .call-note-form-grid { grid-template-columns: 1fr; }
+      }
+
+      .call-note {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 16px 18px;
+        margin-bottom: 10px;
+        backdrop-filter: blur(12px);
+        transition: border-color 0.2s;
+      }
+
+      .call-note:hover { border-color: var(--border-strong); }
+
+      .call-note-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+
+      .call-note-head h4 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .call-note-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 8px;
+        font-size: 12px;
+        color: var(--text-3);
+      }
+
+      .call-note-body {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+      }
+
+      .call-note-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 10px;
+      }
+
       /* ── Auth (split layout) ── */
       .auth-layout {
         min-height: 100vh;
@@ -1229,6 +1297,9 @@
       <symbol id="icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="20 6 9 17 4 12"/>
       </symbol>
+      <symbol id="icon-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+      </symbol>
     </svg>
 
     <!-- ── Login ── -->
@@ -1375,6 +1446,18 @@
               <div class="section-block">
                 <div class="section-head">
                   <h2>
+                    <svg width="14" height="14"><use href="#icon-phone"/></svg>
+                    Call notes
+                    <span id="call-notes-count" class="count">0</span>
+                  </h2>
+                </div>
+                <div id="call-notes-form-wrap"></div>
+                <div id="call-notes"></div>
+              </div>
+
+              <div class="section-block">
+                <div class="section-head">
+                  <h2>
                     Ideas
                     <span id="projects-count" class="count">0</span>
                   </h2>
@@ -1462,6 +1545,7 @@
       const TOKEN_KEY = "concierge_token";
       let token = localStorage.getItem(TOKEN_KEY) || localStorage.getItem("manoverboard_token") || "";
       let currentUser = null;
+      let projectOptions = [];
 
       const PAGE_TITLES = {
         manage: { title: "Workspace", subtitle: "Capture ideas, manage tasks, and let AI suggest what to do next." },
@@ -1689,6 +1773,7 @@
 
       async function loadProjects() {
         const list = await api("GET", "/projects");
+        projectOptions = list;
         $("projects-count").textContent = list.length;
         updateFocusBanner(list);
         if (list.length === 0) {
@@ -1696,6 +1781,7 @@
         } else {
           $("projects").innerHTML = list.map(projectCard).join("");
         }
+        renderCallNoteForm();
       }
 
       function addProject() {
@@ -1841,6 +1927,131 @@
 
       function removeNewCard2(btn) { btn.closest(".goal").remove(); }
 
+      function formatCallDate(iso) {
+        if (!iso) return "—";
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return iso;
+        return d.toLocaleString(undefined, {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        });
+      }
+
+      function projectSelectOptions(selectedId) {
+        const opts = ['<option value="">No linked idea</option>'];
+        for (const p of projectOptions) {
+          opts.push(
+            `<option value="${p.id}" ${String(p.id) === String(selectedId) ? "selected" : ""}>#${p.id} ${esc(p.name)}</option>`
+          );
+        }
+        return opts.join("");
+      }
+
+      function renderCallNoteForm() {
+        const wrap = $("call-notes-form-wrap");
+        if (!wrap) return;
+        wrap.innerHTML = `
+          <div class="call-note-form">
+            <div class="call-note-form-grid">
+              <div class="field" style="margin:0">
+                <label>Contact</label>
+                <input id="call-contact" placeholder="Who did you call?" />
+              </div>
+              <div class="field" style="margin:0">
+                <label>Linked idea</label>
+                <select id="call-project">${projectSelectOptions("")}</select>
+              </div>
+            </div>
+            <div class="field">
+              <label>Notes</label>
+              <textarea id="call-note" placeholder="What did you discuss? Any follow-ups?"></textarea>
+            </div>
+            <div class="field" style="margin-bottom:12px">
+              <label>When</label>
+              <input id="call-when" type="datetime-local" />
+            </div>
+            <button class="primary" onclick="saveCallNote()">
+              <svg><use href="#icon-plus"/></svg>
+              Save call note
+            </button>
+          </div>`;
+        const when = $("call-when");
+        if (when) {
+          const now = new Date();
+          now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+          when.value = now.toISOString().slice(0, 16);
+        }
+      }
+
+      function callNoteCard(n) {
+        const title = n.contact_name || "Phone call";
+        const linked = n.project_name
+          ? `<span class="pill">#${n.project_id} ${esc(n.project_name)}</span>`
+          : "";
+        return `
+          <div class="call-note" data-id="${n.id}">
+            <div class="call-note-head">
+              <h4>${esc(title)}</h4>
+              <button class="task-del" onclick="deleteCallNote(${n.id})" title="Delete">✕</button>
+            </div>
+            <div class="call-note-meta">
+              <span>${esc(formatCallDate(n.called_at))}</span>
+              ${linked}
+            </div>
+            <p class="call-note-body">${esc(n.note)}</p>
+          </div>`;
+      }
+
+      async function loadCallNotes() {
+        const list = await api("GET", "/call-notes");
+        $("call-notes-count").textContent = list.length;
+        if (list.length === 0) {
+          $("call-notes").innerHTML = '<div class="empty-state">No call notes yet — log one after your next conversation.</div>';
+        } else {
+          $("call-notes").innerHTML = list.map(callNoteCard).join("");
+        }
+      }
+
+      async function saveCallNote() {
+        const note = $("call-note")?.value?.trim();
+        if (!note) {
+          toast("Add a note before saving", true);
+          return;
+        }
+        const contact = $("call-contact")?.value?.trim() || null;
+        const projectRaw = $("call-project")?.value;
+        const project_id = projectRaw ? Number(projectRaw) : null;
+        const whenRaw = $("call-when")?.value;
+        let called_at;
+        if (whenRaw) {
+          called_at = new Date(whenRaw).toISOString();
+        }
+        try {
+          await api("POST", "/call-notes", { note, contact_name: contact, project_id, called_at });
+          $("call-note").value = "";
+          $("call-contact").value = "";
+          toast("Call note saved");
+          await loadCallNotes();
+          if (project_id) await loadProjects();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      }
+
+      async function deleteCallNote(id) {
+        if (!confirm("Delete this call note?")) return;
+        try {
+          await api("DELETE", "/call-notes/" + id);
+          toast("Deleted");
+          await loadCallNotes();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      }
+
       async function loadGoals() {
         const list = await api("GET", "/goals");
         $("goals-count").textContent = list.length;
@@ -1889,7 +2100,7 @@
         $("login").classList.add("hidden");
         $("app").classList.remove("hidden");
         updateSidebarUser(currentUser);
-        Promise.all([loadGoals(), loadProjects(), loadSettings()]).catch((e) => toast(e.message, true));
+        Promise.all([loadGoals(), loadProjects(), loadCallNotes(), loadSettings()]).catch((e) => toast(e.message, true));
       }
 
       function showLogin() {

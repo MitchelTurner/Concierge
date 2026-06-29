@@ -99,6 +99,28 @@ export interface Goal {
   updated_at: string;
 }
 
+/** A note captured after a phone call, optionally linked to an idea. */
+export interface CallNote {
+  id: number;
+  user_id: number;
+  project_id: number | null;
+  contact_name: string | null;
+  note: string;
+  called_at: string;
+  created_at: string;
+}
+
+export interface CallNoteWithProject extends CallNote {
+  project_name: string | null;
+}
+
+export interface NewCallNote {
+  contact_name?: string | null;
+  note: string;
+  project_id?: number | null;
+  called_at?: string;
+}
+
 export const PROJECT_EDITABLE_COLUMNS = [
   "name",
   "type",
@@ -244,6 +266,19 @@ CREATE TABLE IF NOT EXISTS project_tasks (
 
 CREATE INDEX IF NOT EXISTS idx_project_tasks_project_id ON project_tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_tasks_user_id ON project_tasks(user_id);
+
+CREATE TABLE IF NOT EXISTS call_notes (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+  contact_name TEXT,
+  note TEXT NOT NULL,
+  called_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_call_notes_user_id ON call_notes(user_id);
+CREATE INDEX IF NOT EXISTS idx_call_notes_project_id ON call_notes(project_id);
 `;
 
 function getPool(): pg.Pool {
@@ -842,6 +877,57 @@ export async function updateGoal(
 export async function deleteGoal(userId: number, id: number): Promise<boolean> {
   const result = await getPool().query(
     "DELETE FROM goals WHERE user_id = $1 AND id = $2",
+    [userId, id]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+// --- Call notes ---
+
+export async function getCallNotes(userId: number, limit = 100): Promise<CallNoteWithProject[]> {
+  const result = await getPool().query<CallNoteWithProject>(
+    `SELECT cn.*, p.name AS project_name
+     FROM call_notes cn
+     LEFT JOIN projects p ON p.id = cn.project_id AND p.user_id = cn.user_id
+     WHERE cn.user_id = $1
+     ORDER BY cn.called_at DESC, cn.id DESC
+     LIMIT $2`,
+    [userId, limit]
+  );
+  return result.rows;
+}
+
+export async function getCallNote(userId: number, id: number): Promise<CallNote | undefined> {
+  const result = await getPool().query<CallNote>(
+    "SELECT * FROM call_notes WHERE user_id = $1 AND id = $2",
+    [userId, id]
+  );
+  return result.rows[0];
+}
+
+export async function addCallNote(userId: number, input: NewCallNote): Promise<CallNoteWithProject> {
+  const calledAt = input.called_at ?? nowIso();
+  const result = await getPool().query<CallNote>(
+    `INSERT INTO call_notes (user_id, project_id, contact_name, note, called_at)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING *`,
+    [userId, input.project_id ?? null, input.contact_name?.trim() || null, input.note.trim(), calledAt]
+  );
+  const note = result.rows[0];
+  if (input.project_id) {
+    await stampProgress(userId, input.project_id);
+  }
+  let projectName: string | null = null;
+  if (note.project_id) {
+    const project = await getProject(userId, note.project_id);
+    projectName = project?.name ?? null;
+  }
+  return { ...note, project_name: projectName };
+}
+
+export async function deleteCallNote(userId: number, id: number): Promise<boolean> {
+  const result = await getPool().query(
+    "DELETE FROM call_notes WHERE user_id = $1 AND id = $2",
     [userId, id]
   );
   return (result.rowCount ?? 0) > 0;

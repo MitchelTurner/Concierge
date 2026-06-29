@@ -18,14 +18,17 @@ import {
   toPublicUser,
 } from "./auth.js";
 import {
+  addCallNote,
   addGoal,
   addProject,
   addProjectTask,
+  deleteCallNote,
   deleteGoal,
   deleteProject,
   deleteProjectTask,
   generateLinkCode,
   getAllProjectsWithTasks,
+  getCallNotes,
   getGoal,
   getGoals,
   getProject,
@@ -38,6 +41,7 @@ import {
   updateProject,
   updateProjectTask,
   updateUserSettings,
+  type NewCallNote,
   type NewProject,
   type ProjectPatch,
   type ProjectStatus,
@@ -371,6 +375,53 @@ export function createServer(config: Config): express.Express {
   api.delete("/goals/:id", async (req, res) => {
     const id = parseId(req);
     if (id === null || !(await deleteGoal(req.userId!, id))) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    res.json({ ok: true });
+  });
+
+  // --- Call notes ---
+  api.get("/call-notes", async (req, res) => {
+    res.json(await getCallNotes(req.userId!));
+  });
+
+  api.post("/call-notes", async (req, res) => {
+    const body = req.body ?? {};
+    const note = toNullableString(body.note);
+    if (!note) return res.status(400).json({ error: "note is required" });
+
+    const projectIdRaw = body.project_id;
+    let projectId: number | null = null;
+    if (projectIdRaw !== null && projectIdRaw !== undefined && projectIdRaw !== "") {
+      projectId = toInt(projectIdRaw);
+      if (projectId === null) return res.status(400).json({ error: "project_id must be an integer" });
+      if (!(await getProject(req.userId!, projectId))) {
+        return res.status(404).json({ error: "project not found" });
+      }
+    }
+
+    const calledAtRaw = toNullableString(body.called_at);
+    let calledAt: string | undefined;
+    if (calledAtRaw) {
+      const parsed = new Date(calledAtRaw);
+      if (Number.isNaN(parsed.getTime())) {
+        return res.status(400).json({ error: "called_at must be a valid date" });
+      }
+      calledAt = parsed.toISOString();
+    }
+
+    const input: NewCallNote = {
+      note,
+      contact_name: toNullableString(body.contact_name),
+      project_id: projectId,
+      called_at: calledAt,
+    };
+    res.status(201).json(await addCallNote(req.userId!, input));
+  });
+
+  api.delete("/call-notes/:id", async (req, res) => {
+    const id = parseId(req);
+    if (id === null || !(await deleteCallNote(req.userId!, id))) {
       return res.status(404).json({ error: "Not found" });
     }
     res.json({ ok: true });
