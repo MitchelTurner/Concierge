@@ -17,7 +17,8 @@ High-level map of how **Concierge** runs as a single Node process.
                     (scheduler.ts)
              │              │
              │              └── every minute: for each linked user,
-             │                  compare local time → send daily / check-in
+             │                  compare local time → send daily / check-in /
+             │                  weekly review
              │
              └── Telegraf long-polling + command handlers
 ```
@@ -42,12 +43,12 @@ Business logic is centralized in `scoring.ts` and reused everywhere:
 | `config.ts` | Load and validate environment variables at boot |
 | `db.ts` | Schema (`CREATE TABLE IF NOT EXISTS`), connection pool, CRUD |
 | `auth.ts` | Signup/login, bcrypt passwords, bearer session tokens |
-| `scoring.ts` | `score()`, `allocateDay()`, deadline/stall date math |
-| `messages.ts` | `formatDailyMessage()`, `formatProjectList()`, stall section |
-| `bot.ts` | Telegram commands, guided `/add` wizard, check-in sessions |
-| `scheduler.ts` | Minute cron → per-user timezone nudges (deduped by date) |
+| `scoring.ts` | `score()`, `allocateDay()`, `planTimebox()`, deadline/stall date math |
+| `messages.ts` | `formatDailyMessage()`, `formatProjectList()`, time-box + weekly review text |
+| `bot.ts` | Telegram commands, guided `/add` wizard, check-in sessions, AI free-text chat |
+| `scheduler.ts` | Minute cron → per-user timezone nudges + weekly review (deduped by date) |
 | `server.ts` | REST API under `/api/*`, serves `public/index.html` |
-| `ai.ts` | Anthropic chat with live DB context + create/update tools |
+| `ai.ts` | Anthropic chat with live DB context + tools, check-in parsing |
 | `daily.ts` | One-shot CLI: send today's message to one user and exit |
 
 ## Data flow examples

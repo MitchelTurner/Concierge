@@ -37,8 +37,11 @@ DATABASE_SSL=false
 | `checkin_time` | TEXT | `HH:MM` for evening check-in |
 | `timezone` | TEXT | IANA timezone for cron |
 | `stall_days` | INTEGER | days without progress = stalling |
+| `weekly_review_day` | INTEGER | 0 (Sunday) – 6 (Saturday) for the weekly review |
+| `weekly_review_time` | TEXT | `HH:MM` for the weekly review |
 | `last_daily_nudge_date` | DATE | prevents duplicate daily sends |
 | `last_checkin_nudge_date` | DATE | prevents duplicate check-in sends |
+| `last_weekly_review_date` | DATE | prevents duplicate weekly review sends |
 
 ### `sessions`
 

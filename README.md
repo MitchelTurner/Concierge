@@ -27,7 +27,7 @@ is isolated by `user_id`.
 - [Progress-based accountability](#progress-based-accountability)
 - [Project structure](#project-structure)
 - [Data model](#data-model)
-- [Roadmap](#roadmap-not-built-yet)
+- [Roadmap](#roadmap)
 - [Contributing](#contributing)
 
 ## Core idea — dual-track prioritization
@@ -223,6 +223,8 @@ Link your account first (`/link CODE` from dashboard Settings). Then:
 | `/link CODE` | Link this Telegram chat to your dashboard account |
 | `/unlink` | Disconnect Telegram from your account |
 | `/today` | Re-send today's allocation on demand |
+| `/time {minutes}` | Fit tasks to a block of free time (income work first, ~30 min per task) |
+| `/review` | Weekly review on demand (also sent automatically on your review day) |
 | `/list` | List active projects with id, name, type, score (compact) |
 | `/add` | Guided add, one question at a time (name → type → scoring → description → optional first task) |
 | `/next {id} {text}` | Add a task to a project (stamps progress) |
@@ -231,6 +233,15 @@ Link your account first (`/link CODE` from dashboard Settings). Then:
 | `/status {id} {status}` | Update status (`idea`/`active`/`blocked`/`shipped`/`paid`/`archived`) |
 | `/skip` | Skip the evening check-in (reply to the check-in prompt) |
 | `/cancel` | Abort an in-progress `/add` or `/done` follow-up |
+| `/reset` | Clear the AI assistant's conversation memory for this chat |
+
+**Talk to it in plain language.** When `ANTHROPIC_API_KEY` is set, any message
+that isn't a command (and isn't answering a wizard or check-in prompt) goes to
+the same AI assistant as the dashboard's Assistant tab — with your live
+portfolio as context and full tool access. So *"mark the invoice task done and
+add a task to follow up with the client Friday"* just works from your phone.
+Conversation history is kept in memory per chat (cleared on restart or
+`/reset`).
 
 ## Web dashboard
 
@@ -240,8 +251,8 @@ so edits show up immediately in `/today`, `/list`, etc.
 
 - **Auth:** `POST /api/auth/signup`, `POST /api/auth/login` return a bearer token.
   All `/api/*` data routes require `Authorization: Bearer <token>`.
-- **Settings tab:** per-user schedule (daily nudge, check-in, timezone, stall days)
-  and Telegram link code generation.
+- **Settings tab:** per-user schedule (daily nudge, check-in, weekly review
+  day/time, timezone, stall days) and Telegram link code generation.
 - **No build step.** Static `public/index.html` + Express API in `src/server.ts`.
 
 ### AI chat agent (Assistant tab)
@@ -335,7 +346,13 @@ Concierge tracks momentum, not just priority — it works for any project type
   to the `daily_log` table; the bot confirms and lists anything still stalling so
   you end the day knowing what's slipping. Send `/skip` to skip logging. (An
   in-progress `/add` always takes priority, so the check-in can't collide with
-  it.)
+  it.) When the AI assistant is configured, the check-in is also parsed: tasks
+  you clearly finished are marked done and projects you mention get their stall
+  clock reset — you report once and the system updates itself.
+- **Weekly review.** Once a week (default Sunday 17:00 local, configurable in
+  Settings) the bot sends a review: tasks shipped in the last 7 days grouped by
+  project, check-in streak, anything stalling, and the suggested focus for next
+  week. `/review` sends it on demand.
 
 ## Project structure
 
@@ -348,8 +365,8 @@ concierge/
     auth.ts        # signup/login, sessions, password hashing
     scoring.ts     # score() + allocateDay() — core prioritization logic
     messages.ts    # daily message + list formatting (shared by bot & scheduler)
-    bot.ts         # Telegraf commands (/add wizard, check-in, /progress)
-    scheduler.ts   # per-user timezone cron → daily nudge + evening check-in
+    bot.ts         # Telegraf commands (/add wizard, check-in, /time) + AI free-text chat
+    scheduler.ts   # per-user timezone cron → daily nudge, evening check-in, weekly review
     server.ts      # Express API + static dashboard
     ai.ts          # Anthropic assistant with live context + tools
     daily.ts       # one-shot: send allocation to one user and exit
@@ -436,18 +453,16 @@ Table `goals` (edited from the web dashboard):
 | `created_at` | TEXT | ISO datetime |
 | `updated_at` | TEXT | ISO datetime |
 
-## Roadmap (not built yet)
+## Roadmap
 
-- **Phase 2:** evening check-in + `daily_log` table are built; the Anthropic AI
-  agent is available as the dashboard **Assistant** (see
-  [AI chat agent](#ai-chat-agent-assistant-tab)). Still open: having the agent
-  rewrite the formula-based allocation, and `/time {minutes}` to tailor
-  suggestions to tonight's available time.
-- **Phase 3:** Weekly review summary, calendar awareness. (An editable web
-  dashboard — beyond the originally-planned read-only one — is already built; see
+- **Phase 2 (done):** evening check-in + `daily_log`, the Anthropic AI agent
+  (dashboard **Assistant** tab *and* free-text Telegram chat), AI-parsed
+  check-ins, and `/time {minutes}` to tailor suggestions to tonight's available
+  time. Still open: having the agent rewrite the formula-based allocation.
+- **Phase 3:** weekly review summary is built (scheduled + `/review`); calendar
+  awareness is still open. (An editable web dashboard — beyond the
+  originally-planned read-only one — is also built; see
   [Web dashboard](#web-dashboard).)
-
-The Phase 2/3 items above are intentionally **not** implemented yet.
 
 ## Contributing
 
