@@ -475,6 +475,18 @@ export function createServer(config: Config): express.Express {
       if (n === null || n < 1) return res.status(400).json({ error: "stall_days must be >= 1" });
       patch.stall_days = n;
     }
+    if ("weekly_review_day" in body) {
+      const n = toInt(body.weekly_review_day);
+      if (n === null || n < 0 || n > 6) {
+        return res.status(400).json({ error: "weekly_review_day must be 0 (Sunday) to 6 (Saturday)" });
+      }
+      patch.weekly_review_day = n;
+    }
+    if ("weekly_review_time" in body) {
+      const t = String(body.weekly_review_time).trim();
+      if (!TIME_RE.test(t)) return res.status(400).json({ error: "weekly_review_time must be HH:MM" });
+      patch.weekly_review_time = t;
+    }
 
     const updated = await updateUserSettings(req.userId!, patch);
     if (!updated) return res.status(404).json({ error: "Not found" });

@@ -1681,6 +1681,21 @@
                       <div class="field"><label>Timezone</label><input id="settings-tz" placeholder="America/Chicago" /></div>
                       <div class="field"><label>Stall days</label><input id="settings-stall" type="number" min="1" /></div>
                     </div>
+                    <div class="row">
+                      <div class="field">
+                        <label>Weekly review day</label>
+                        <select id="settings-weekly-day">
+                          <option value="0">Sunday</option>
+                          <option value="1">Monday</option>
+                          <option value="2">Tuesday</option>
+                          <option value="3">Wednesday</option>
+                          <option value="4">Thursday</option>
+                          <option value="5">Friday</option>
+                          <option value="6">Saturday</option>
+                        </select>
+                      </div>
+                      <div class="field"><label>Weekly review time</label><input id="settings-weekly-time" type="time" /></div>
+                    </div>
                     <div class="card-actions" style="margin-top:4px;border-top:none;padding-top:0">
                       <button class="primary" onclick="saveSettings()">Save schedule</button>
                     </div>
@@ -2695,6 +2710,8 @@
         $("settings-checkin").value = toTimeInput(user.checkin_time);
         $("settings-tz").value = user.timezone || "";
         $("settings-stall").value = user.stall_days || 4;
+        $("settings-weekly-day").value = String(user.weekly_review_day ?? 0);
+        $("settings-weekly-time").value = toTimeInput(user.weekly_review_time || "17:00");
         $("telegram-status").textContent = user.telegram_linked
           ? "Telegram is linked — you'll get daily nudges and check-ins."
           : "Link Telegram to get daily focus messages and evening check-ins.";
@@ -2711,6 +2728,8 @@
             checkin_time: fromTimeInput($("settings-checkin").value),
             timezone: $("settings-tz").value.trim(),
             stall_days: Number($("settings-stall").value),
+            weekly_review_day: Number($("settings-weekly-day").value),
+            weekly_review_time: fromTimeInput($("settings-weekly-time").value),
           });
           currentUser = user;
           updateSidebarUser(user);

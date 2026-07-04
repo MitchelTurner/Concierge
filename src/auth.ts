@@ -31,6 +31,8 @@ export interface PublicUser {
   checkin_time: string;
   timezone: string;
   stall_days: number;
+  weekly_review_day: number;
+  weekly_review_time: string;
 }
 
 export function toPublicUser(user: User): PublicUser {
@@ -43,6 +45,8 @@ export function toPublicUser(user: User): PublicUser {
     checkin_time: user.checkin_time,
     timezone: user.timezone,
     stall_days: user.stall_days,
+    weekly_review_day: user.weekly_review_day,
+    weekly_review_time: user.weekly_review_time,
   };
 }
 
