@@ -1,10 +1,12 @@
 /**
  * Telegram message formatting for scored projects and tasks.
  */
-import { allocateDay, daysSince, daysUntil, type DayAllocation } from "./scoring.js";
+import { allocateDay, daysSince, daysUntil, planTimebox, type DayAllocation } from "./scoring.js";
 import {
   getAllProjectsWithTasks,
+  getDailyLogSince,
   getStalledProjects,
+  getTasksCompletedSince,
   type ProjectWithTasks,
 } from "./db.js";
 
@@ -81,6 +83,86 @@ export async function formatDailyMessage(
       lines.push("");
       lines.push(stallSection);
     }
+  }
+
+  return lines.join("\n");
+}
+
+/** Suggest what to do with a fixed block of free time, income work first. */
+export async function formatTimeboxMessage(userId: number, minutes: number): Promise<string> {
+  const all = await getAllProjectsWithTasks(userId);
+  const plan = planTimebox(all, minutes);
+
+  if (plan.items.length === 0) {
+    return (
+      `You have ${minutes} min but no active project has a next task.\n` +
+      "Use /add to capture one, or add a task with /next {id} {task}."
+    );
+  }
+
+  const lines: string[] = [`\u23F1\uFE0F ${minutes} min? Here's the best use of it:`, ""];
+  plan.items.forEach((item, i) => {
+    const tag = item.project.type === "fast" ? "\uD83D\uDCB0" : "\uD83C\uDF31";
+    lines.push(`${i + 1}. ${tag} ${item.action}`);
+    lines.push(`   (${item.project.name} #${item.project.id})`);
+  });
+
+  if (plan.deadlineWarnings.length > 0) {
+    lines.push("");
+    lines.push(
+      `\u23F0 Deadlines soon: ${plan.deadlineWarnings
+        .map((p) => `${p.name} (due ${p.deadline})`)
+        .join("; ")}`
+    );
+  }
+
+  lines.push("");
+  lines.push("Reply /done {id} when you finish something.");
+  return lines.join("\n");
+}
+
+/** Look back over the last 7 days and set up the week ahead. */
+export async function formatWeeklyReview(userId: number, stallDays: number): Promise<string> {
+  const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const completed = await getTasksCompletedSince(userId, since);
+  const logs = await getDailyLogSince(userId, since);
+  const all = await getAllProjectsWithTasks(userId);
+  const alloc = allocateDay(all);
+
+  const lines: string[] = ["\uD83D\uDCCA Weekly review", ""];
+
+  if (completed.length > 0) {
+    const byProject = new Map<string, number>();
+    for (const t of completed) {
+      byProject.set(t.project_name, (byProject.get(t.project_name) ?? 0) + 1);
+    }
+    lines.push(`\u2705 Shipped this week: ${completed.length} task${completed.length === 1 ? "" : "s"}`);
+    for (const [name, count] of byProject) {
+      lines.push(`\u2022 ${name} — ${count} done`);
+    }
+  } else {
+    lines.push("\u2705 No tasks completed this week. Pick one small win to start the next one.");
+  }
+
+  if (logs.length > 0) {
+    lines.push("");
+    lines.push(`\uD83D\uDCDD Check-ins logged: ${logs.length} of 7 days`);
+  }
+
+  const stallSection = await buildStallSection(userId, stallDays);
+  if (stallSection) {
+    lines.push("");
+    lines.push(stallSection);
+  }
+
+  lines.push("");
+  if (alloc.primary) {
+    const { project, action } = alloc.primary;
+    lines.push(`\uD83C\uDFAF Next week's focus: ${project.name}`);
+    lines.push(`\u2192 ${action ?? "Add a concrete next action."}`);
+  } else {
+    lines.push("\uD83C\uDFAF No fast project is ready for next week.");
+    lines.push("Activate one income project and give it a concrete first task.");
   }
 
   return lines.join("\n");

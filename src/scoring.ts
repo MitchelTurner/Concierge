@@ -98,6 +98,61 @@ function deadlineWarnings(projects: ProjectWithTasks[]): Project[] {
     .sort((a, b) => (daysUntil(a.deadline!) ?? Infinity) - (daysUntil(b.deadline!) ?? Infinity));
 }
 
+export interface TimeboxItem {
+  project: Project;
+  /** Concrete task title (or the project's next_action fallback). */
+  action: string;
+  score: number;
+}
+
+export interface TimeboxPlan {
+  minutes: number;
+  items: TimeboxItem[];
+  deadlineWarnings: Project[];
+}
+
+/** Minutes assumed per task when filling a time box. */
+const MINUTES_PER_TASK = 30;
+
+/**
+ * Fill a block of available minutes with concrete tasks, income work first.
+ * Roughly one task per 30 minutes; passive work only joins when there is at
+ * least an hour and income tasks did not already fill the box.
+ */
+export function planTimebox(projects: ProjectWithTasks[], minutes: number): TimeboxPlan {
+  const ranked = rankProjects(projects);
+  const slots = Math.max(1, Math.floor(minutes / MINUTES_PER_TASK));
+  const items: TimeboxItem[] = [];
+
+  const fast = ranked.filter((p) => p.type === "fast" && isAllocatable(p));
+  const passive = ranked.filter((p) => p.type === "passive" && isAllocatable(p));
+
+  for (const project of fast) {
+    if (items.length >= slots) break;
+    const pending = openTasks(project);
+    const actions = pending.length ? pending.map((t) => t.title) : [project.next_action!];
+    for (const action of actions) {
+      if (items.length >= slots) break;
+      items.push({ project, action, score: scoreProject(project) });
+    }
+  }
+
+  if (items.length < slots && minutes >= 60 && passive[0]) {
+    const project = passive[0];
+    const action = projectAction(project);
+    if (action) items.push({ project, action, score: scoreProject(project) });
+  }
+
+  // Nothing income-ready: fall back to the best passive task so the time isn't wasted.
+  if (items.length === 0 && passive[0]) {
+    const project = passive[0];
+    const action = projectAction(project);
+    if (action) items.push({ project, action, score: scoreProject(project) });
+  }
+
+  return { minutes, items, deadlineWarnings: deadlineWarnings(projects) };
+}
+
 export function allocateDay(projects: ProjectWithTasks[]): DayAllocation {
   const ranked = rankProjects(projects);
   const openTaskCount = projects.reduce((n, p) => n + openTasks(p).length, 0);

@@ -41,8 +41,12 @@ export interface User {
   checkin_time: string;
   timezone: string;
   stall_days: number;
+  /** 0 = Sunday … 6 = Saturday. */
+  weekly_review_day: number;
+  weekly_review_time: string;
   last_daily_nudge_date: string | null;
   last_checkin_nudge_date: string | null;
+  last_weekly_review_date: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -185,6 +189,8 @@ export interface UserSettingsPatch {
   checkin_time?: string;
   timezone?: string;
   stall_days?: number;
+  weekly_review_day?: number;
+  weekly_review_time?: string;
 }
 
 let pool: pg.Pool | null = null;
@@ -213,11 +219,19 @@ CREATE TABLE IF NOT EXISTS users (
   checkin_time TEXT NOT NULL DEFAULT '20:00',
   timezone TEXT NOT NULL DEFAULT 'America/Chicago',
   stall_days INTEGER NOT NULL DEFAULT 4,
+  weekly_review_day INTEGER NOT NULL DEFAULT 0,
+  weekly_review_time TEXT NOT NULL DEFAULT '17:00',
   last_daily_nudge_date DATE,
   last_checkin_nudge_date DATE,
+  last_weekly_review_date DATE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Columns added after launch (no-ops on fresh installs).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_review_day INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_review_time TEXT NOT NULL DEFAULT '17:00';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_weekly_review_date DATE;
 
 CREATE TABLE IF NOT EXISTS sessions (
   id SERIAL PRIMARY KEY,
@@ -428,6 +442,14 @@ export async function updateUserSettings(
     sets.push(`stall_days = $${i++}`);
     params.push(patch.stall_days);
   }
+  if (patch.weekly_review_day !== undefined) {
+    sets.push(`weekly_review_day = $${i++}`);
+    params.push(patch.weekly_review_day);
+  }
+  if (patch.weekly_review_time !== undefined) {
+    sets.push(`weekly_review_time = $${i++}`);
+    params.push(patch.weekly_review_time);
+  }
 
   if (sets.length === 0) return getUserById(userId);
 
@@ -503,13 +525,22 @@ export async function markCheckinNudgeSent(userId: number, date: string): Promis
   );
 }
 
-function nudgeClaimKey(kind: "daily" | "checkin", userId: number, date: string): string {
+export async function markWeeklyReviewSent(userId: number, date: string): Promise<void> {
+  await getPool().query(
+    "UPDATE users SET last_weekly_review_date = $1, updated_at = NOW() WHERE id = $2",
+    [date, userId]
+  );
+}
+
+export type NudgeKind = "daily" | "checkin" | "weekly";
+
+function nudgeClaimKey(kind: NudgeKind, userId: number, date: string): string {
   return `nudge:${kind}:${userId}:${date}`;
 }
 
 export async function claimUserNudge(
   userId: number,
-  kind: "daily" | "checkin",
+  kind: NudgeKind,
   date: string
 ): Promise<boolean> {
   const result = await getPool().query<{ key: string }>(
@@ -524,13 +555,15 @@ export async function claimUserNudge(
 
 export async function completeUserNudge(
   userId: number,
-  kind: "daily" | "checkin",
+  kind: NudgeKind,
   date: string
 ): Promise<void> {
   if (kind === "daily") {
     await markDailyNudgeSent(userId, date);
-  } else {
+  } else if (kind === "checkin") {
     await markCheckinNudgeSent(userId, date);
+  } else {
+    await markWeeklyReviewSent(userId, date);
   }
 
   await getPool().query("UPDATE app_meta SET value = 'sent' WHERE key = $1", [
@@ -540,7 +573,7 @@ export async function completeUserNudge(
 
 export async function releaseUserNudgeClaim(
   userId: number,
-  kind: "daily" | "checkin",
+  kind: NudgeKind,
   date: string
 ): Promise<void> {
   await getPool().query("DELETE FROM app_meta WHERE key = $1", [nudgeClaimKey(kind, userId, date)]);
@@ -675,6 +708,39 @@ export async function getDailyLog(userId: number, limit = 50): Promise<DailyLogE
      ORDER BY created_at DESC
      LIMIT $2`,
     [userId, limit]
+  );
+  return result.rows;
+}
+
+export async function getDailyLogSince(
+  userId: number,
+  sinceIso: string
+): Promise<DailyLogEntry[]> {
+  const result = await getPool().query<DailyLogEntry>(
+    `SELECT * FROM daily_log
+     WHERE user_id = $1 AND created_at >= $2
+     ORDER BY created_at ASC`,
+    [userId, sinceIso]
+  );
+  return result.rows;
+}
+
+export interface CompletedTaskRow extends ProjectTask {
+  project_name: string;
+}
+
+/** Tasks marked done since a timestamp, with their project name for reporting. */
+export async function getTasksCompletedSince(
+  userId: number,
+  sinceIso: string
+): Promise<CompletedTaskRow[]> {
+  const result = await getPool().query<CompletedTaskRow>(
+    `SELECT t.*, p.name AS project_name
+     FROM project_tasks t
+     JOIN projects p ON p.id = t.project_id
+     WHERE t.user_id = $1 AND t.done = true AND t.updated_at >= $2
+     ORDER BY t.updated_at ASC`,
+    [userId, sinceIso]
   );
   return result.rows;
 }
