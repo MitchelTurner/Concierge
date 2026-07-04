@@ -17,10 +17,21 @@ import {
 export interface UserNudgeCallbacks {
   sendDaily: (user: User) => Promise<void>;
   sendCheckin: (user: User) => Promise<void>;
+  sendWeekly: (user: User) => Promise<void>;
 }
 
-/** Format current local time in a user's timezone as "HH:MM". */
-function localTimeInTz(timezone: string): { time: string; date: string } {
+const WEEKDAY_INDEX: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+};
+
+/** Current local time ("HH:MM"), date, and weekday (0 = Sunday) in a user's timezone. */
+function localTimeInTz(timezone: string): { time: string; date: string; weekday: number } {
   const now = new Date();
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
@@ -30,6 +41,7 @@ function localTimeInTz(timezone: string): { time: string; date: string } {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+    weekday: "short",
   }).formatToParts(now);
 
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
@@ -42,6 +54,7 @@ function localTimeInTz(timezone: string): { time: string; date: string } {
   return {
     time: `${hour}:${minute}`,
     date: `${year}-${month}-${day}`,
+    weekday: WEEKDAY_INDEX[get("weekday")] ?? 0,
   };
 }
 
@@ -68,7 +81,7 @@ async function runUserNudges(callbacks: UserNudgeCallbacks): Promise<void> {
   const users = await getUsersWithTelegram();
 
   for (const user of users) {
-    const { time, date } = localTimeInTz(user.timezone);
+    const { time, date, weekday } = localTimeInTz(user.timezone);
 
     if (
       timesMatch(user.daily_time, time) &&
@@ -99,6 +112,23 @@ async function runUserNudges(callbacks: UserNudgeCallbacks): Promise<void> {
       } catch (err) {
         await releaseUserNudgeClaim(user.id, "checkin", date);
         console.error(`[scheduler] check-in failed for user #${user.id}:`, err);
+      }
+    }
+
+    if (
+      weekday === user.weekly_review_day &&
+      timesMatch(user.weekly_review_time, time) &&
+      user.last_weekly_review_date !== date
+    ) {
+      const claimed = await claimUserNudge(user.id, "weekly", date);
+      if (!claimed) continue;
+      try {
+        await callbacks.sendWeekly(user);
+        await completeUserNudge(user.id, "weekly", date);
+        console.log(`[scheduler] weekly review sent to user #${user.id}`);
+      } catch (err) {
+        await releaseUserNudgeClaim(user.id, "weekly", date);
+        console.error(`[scheduler] weekly review failed for user #${user.id}:`, err);
       }
     }
   }

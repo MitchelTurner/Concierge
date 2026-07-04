@@ -32,11 +32,12 @@ async function main(): Promise<void> {
     60 * 60 * 1000
   );
 
-  const { bot, sendDailyMessage, sendCheckinMessage } = createBot(config);
+  const { bot, sendDailyMessage, sendCheckinMessage, sendWeeklyReview } = createBot(config);
 
   startUserScheduler({
     sendDaily: sendDailyMessage,
     sendCheckin: sendCheckinMessage,
+    sendWeekly: sendWeeklyReview,
   });
 
   startServer(config);

@@ -3,7 +3,8 @@
  *
  * Commands mutate Postgres via db.ts; read paths use messages.ts for formatting.
  * In-memory `sessions` track multi-step flows (/add wizard, /done follow-up,
- * evening check-in) keyed by Telegram chat id.
+ * evening check-in) keyed by Telegram chat id. Free text outside a session is
+ * routed to the AI assistant (when configured) with per-chat history.
  */
 import { Telegraf } from "telegraf";
 import { message } from "telegraf/filters";
@@ -24,7 +25,14 @@ import {
   type User,
   PROJECT_STATUSES,
 } from "./db.js";
-import { buildStallSection, formatDailyMessage, formatProjectList } from "./messages.js";
+import {
+  buildStallSection,
+  formatDailyMessage,
+  formatProjectList,
+  formatTimeboxMessage,
+  formatWeeklyReview,
+} from "./messages.js";
+import { chat, isAiConfigured, processCheckin, type ChatAction, type ChatMessage } from "./ai.js";
 
 const SETTABLE_STATUSES: ProjectStatus[] = [...PROJECT_STATUSES];
 
@@ -53,15 +61,39 @@ interface CheckinSession {
 
 type Session = AddDraft | DoneFollowUp | CheckinSession;
 
+/** Telegram messages are capped at 4096 chars; keep a margin for suffixes. */
+const TELEGRAM_MAX_REPLY = 4000;
+/** Turns of assistant conversation kept per chat (user + assistant messages). */
+const MAX_CHAT_HISTORY = 20;
+
 export interface ConciergeBot {
   bot: Telegraf;
   sendDailyMessage: (user: User) => Promise<void>;
   sendCheckinMessage: (user: User) => Promise<void>;
+  sendWeeklyReview: (user: User) => Promise<void>;
+}
+
+function describeAction(a: ChatAction): string {
+  switch (a.type) {
+    case "created_project":
+      return `Created idea #${a.id} "${a.name}"${a.taskCount ? ` with ${a.taskCount} task(s)` : ""}`;
+    case "updated_project":
+      return `Updated idea #${a.id} "${a.name}"`;
+    case "created_goal":
+      return `Added goal "${a.title}"`;
+    case "added_tasks":
+      return `Added ${a.taskCount} task(s) to "${a.name}"`;
+    case "completed_task":
+      return `Marked done: "${a.title}"`;
+    case "logged_progress":
+      return `Logged progress on "${a.name}"`;
+  }
 }
 
 export function createBot(config: Config): ConciergeBot {
   const bot = new Telegraf(config.telegramBotToken);
   const sessions = new Map<string, Session>();
+  const chatHistories = new Map<string, ChatMessage[]>();
 
   async function requireLinkedUser(
     ctx: { chat?: { id?: number }; reply: (s: string) => Promise<unknown> }
@@ -84,21 +116,28 @@ export function createBot(config: Config): ConciergeBot {
   bot.start(async (ctx) => {
     const user = await requireLinkedUser(ctx);
     if (!user) return;
-    await ctx.reply(
-      [
-        "\u2693 Concierge is online.",
+    const lines = [
+      "\u2693 Concierge is online.",
+      "",
+      "Commands:",
+      "/today — today's focus",
+      "/time {minutes} — what to do with a block of free time",
+      "/review — weekly review (sent every week automatically)",
+      "/list — your projects + open tasks",
+      "/add — capture a new project (guided)",
+      "/next {id} {task} — add a task to a project",
+      "/done {id} — complete the next open task",
+      "/progress {id} [note] — log progress on a project",
+      "/status {id} {status} — update project status",
+      "/unlink — disconnect this Telegram from your account",
+    ];
+    if (isAiConfigured(config)) {
+      lines.push(
         "",
-        "Commands:",
-        "/today — today's focus",
-        "/list — your projects + open tasks",
-        "/add — capture a new project (guided)",
-        "/next {id} {task} — add a task to a project",
-        "/done {id} — complete the next open task",
-        "/progress {id} [note] — log progress on a project",
-        "/status {id} {status} — update project status",
-        "/unlink — disconnect this Telegram from your account",
-      ].join("\n")
-    );
+        "Or just talk to me — e.g. \u201cadd a task to invoice the client\u201d or \u201cwhat should I work on?\u201d. /reset clears our conversation."
+      );
+    }
+    await ctx.reply(lines.join("\n"));
   });
 
   bot.command("link", async (ctx) => {
@@ -143,6 +182,31 @@ export function createBot(config: Config): ConciergeBot {
     const user = await requireLinkedUser(ctx);
     if (!user) return;
     await ctx.reply(await formatDailyMessage(user.id, user.stall_days));
+  });
+
+  bot.command("time", async (ctx) => {
+    const user = await requireLinkedUser(ctx);
+    if (!user) return;
+    const raw = stripCommand(ctx.message.text).trim();
+    const minutes = Number(raw);
+    if (!Number.isInteger(minutes) || minutes < 15 || minutes > 720) {
+      await ctx.reply("Usage: /time {minutes} — e.g. /time 45 (15 to 720)");
+      return;
+    }
+    await ctx.reply(await formatTimeboxMessage(user.id, minutes));
+  });
+
+  bot.command("review", async (ctx) => {
+    const user = await requireLinkedUser(ctx);
+    if (!user) return;
+    await ctx.reply(await formatWeeklyReview(user.id, user.stall_days));
+  });
+
+  bot.command("reset", async (ctx) => {
+    const chatId = ctx.chat?.id?.toString();
+    if (!chatId) return;
+    chatHistories.delete(chatId);
+    await ctx.reply("Assistant conversation cleared — we start fresh.");
   });
 
   bot.command("list", async (ctx) => {
@@ -276,7 +340,8 @@ export function createBot(config: Config): ConciergeBot {
     }
   });
 
-  // Free-text handler: only runs when a session is active (not for commands).
+  // Free-text handler: active sessions (wizard, check-in) win; anything else
+  // goes to the AI assistant when it is configured.
   bot.on(message("text"), async (ctx) => {
     const text = ctx.message.text;
     if (text.startsWith("/")) return;
@@ -288,14 +353,13 @@ export function createBot(config: Config): ConciergeBot {
     if (!user) return;
 
     const session = sessions.get(chatId);
-    if (!session) return;
 
-    if (session.kind === "add") {
+    if (session?.kind === "add") {
       await handleAddStep(ctx, user.id, session, sessions, chatId, text);
       return;
     }
 
-    if (session.kind === "done_next_task") {
+    if (session?.kind === "done_next_task") {
       await addProjectTask(user.id, session.projectId, text.trim());
       await stampProgress(user.id, session.projectId);
       sessions.delete(chatId);
@@ -303,14 +367,35 @@ export function createBot(config: Config): ConciergeBot {
       return;
     }
 
-    if (session.kind === "checkin") {
-      await addDailyLog(user.id, text.trim());
-      sessions.delete(chatId);
-      const stalls = await buildStallSection(user.id, user.stall_days);
+    if (session?.kind === "checkin") {
+      await handleCheckinReply(ctx, config, user, sessions, chatId, text.trim());
+      return;
+    }
+
+    // No session: conversational assistant.
+    if (!isAiConfigured(config)) {
       await ctx.reply(
-        stalls
-          ? `\u2705 Logged. Thanks.\n\n${stalls}`
-          : "\u2705 Logged. Thanks. Nothing stalling right now — nice."
+        "I only understand commands right now — try /today, /list, or /add.\n" +
+          "(Set ANTHROPIC_API_KEY on the server to chat with me in plain language.)"
+      );
+      return;
+    }
+
+    await ctx.sendChatAction("typing");
+    const history = chatHistories.get(chatId) ?? [];
+    history.push({ role: "user", content: text });
+    try {
+      const result = await chat(config, user.id, history, { allowWrite: true });
+      history.push({ role: "assistant", content: result.reply });
+      chatHistories.set(chatId, history.slice(-MAX_CHAT_HISTORY));
+      const summary = result.actions.map((a) => `\u2705 ${describeAction(a)}`).join("\n");
+      const reply = summary ? `${result.reply}\n\n${summary}` : result.reply;
+      await ctx.reply(reply.slice(0, TELEGRAM_MAX_REPLY));
+    } catch (err) {
+      history.pop();
+      console.error("[bot] assistant chat failed:", err);
+      await ctx.reply(
+        "The assistant hit an error — try again in a moment, or use commands like /today and /list."
       );
     }
   });
@@ -335,7 +420,53 @@ export function createBot(config: Config): ConciergeBot {
     );
   };
 
-  return { bot, sendDailyMessage, sendCheckinMessage };
+  const sendWeeklyReview = async (user: User): Promise<void> => {
+    if (!user.telegram_chat_id) return;
+    await bot.telegram.sendMessage(
+      user.telegram_chat_id,
+      await formatWeeklyReview(user.id, user.stall_days)
+    );
+  };
+
+  return { bot, sendDailyMessage, sendCheckinMessage, sendWeeklyReview };
+}
+
+/**
+ * Log the evening check-in, and — when AI is available — parse it to mark
+ * finished tasks done and stamp progress on the projects it mentions.
+ */
+async function handleCheckinReply(
+  ctx: { reply: (s: string) => Promise<unknown> },
+  config: Config,
+  user: User,
+  sessions: Map<string, Session>,
+  chatId: string,
+  note: string
+): Promise<void> {
+  await addDailyLog(user.id, note);
+  sessions.delete(chatId);
+
+  const outcomeLines: string[] = [];
+  if (isAiConfigured(config)) {
+    try {
+      const outcome = await processCheckin(config, user.id, note);
+      for (const t of outcome.completedTasks) {
+        outcomeLines.push(`\u2705 Marked done: "${t.title}" (${t.project})`);
+      }
+      for (const p of outcome.progressedProjects) {
+        outcomeLines.push(`\uD83D\uDCC8 Progress logged on ${p.name}`);
+      }
+    } catch (err) {
+      // Check-in text is already saved; parsing is best-effort.
+      console.error("[bot] check-in AI parse failed:", err);
+    }
+  }
+
+  const stalls = await buildStallSection(user.id, user.stall_days);
+  const parts = ["\u2705 Logged. Thanks."];
+  if (outcomeLines.length) parts.push(outcomeLines.join("\n"));
+  parts.push(stalls ?? "Nothing stalling right now — nice.");
+  await ctx.reply(parts.join("\n\n"));
 }
 
 async function handleAddStep(
