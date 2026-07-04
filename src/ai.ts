@@ -4,17 +4,21 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Config } from "./config.js";
 import {
+  addDailyLog,
   addGoal,
   addProject,
   addProjectTask,
   getAllProjectsWithTasks,
   getGoals,
   getMeetingNotes,
+  getProjectTask,
   getProjectWithTasks,
   getStalledProjects,
   getUserById,
   PROJECT_TYPES,
+  stampProgress,
   updateProject,
+  updateProjectTask,
   type MeetingNote,
   type NewProject,
   type ProjectPatch,
@@ -29,7 +33,13 @@ export interface ChatMessage {
 }
 
 export interface ChatAction {
-  type: "created_project" | "updated_project" | "created_goal" | "added_tasks";
+  type:
+    | "created_project"
+    | "updated_project"
+    | "created_goal"
+    | "added_tasks"
+    | "completed_task"
+    | "logged_progress";
   id: number;
   name?: string;
   title?: string;
@@ -119,6 +129,31 @@ const TOOLS: Anthropic.Tool[] = [
         detail: { type: "string" },
       },
       required: ["title"],
+    },
+  },
+  {
+    name: "complete_task",
+    description:
+      "Mark a task done when the user says they finished it. Use the task id shown in the ideas list.",
+    input_schema: {
+      type: "object",
+      properties: {
+        task_id: { type: "integer", description: "Id of the task to mark done" },
+      },
+      required: ["task_id"],
+    },
+  },
+  {
+    name: "log_progress",
+    description:
+      "Record that the user made progress on an idea today (resets its stall timer) and optionally save a short progress note.",
+    input_schema: {
+      type: "object",
+      properties: {
+        project_id: { type: "integer", description: "Idea id" },
+        note: { type: "string", description: "Short progress note in the user's words" },
+      },
+      required: ["project_id"],
     },
   },
 ];
@@ -317,6 +352,39 @@ async function runTool(userId: number, name: string, input: unknown): Promise<To
     };
   }
 
+  if (name === "complete_task") {
+    const taskId = toInt(body.task_id ?? body.id);
+    if (taskId === null) {
+      return { output: { ok: false, error: "task_id must be an integer" }, actions: [] };
+    }
+    const existing = await getProjectTask(userId, taskId);
+    if (!existing) return { output: { ok: false, error: `no task #${taskId}` }, actions: [] };
+    if (existing.done) {
+      return { output: { ok: true, note: "task was already done" }, actions: [] };
+    }
+    const task = await updateProjectTask(userId, taskId, { done: true });
+    return {
+      output: { ok: true, task: { id: taskId, title: task?.title ?? existing.title } },
+      actions: [{ type: "completed_task", id: taskId, title: task?.title ?? existing.title }],
+    };
+  }
+
+  if (name === "log_progress") {
+    const projectId = toInt(body.project_id ?? body.id);
+    if (projectId === null) {
+      return { output: { ok: false, error: "project_id must be an integer" }, actions: [] };
+    }
+    const idea = await getProjectWithTasks(userId, projectId);
+    if (!idea) return { output: { ok: false, error: `no idea #${projectId}` }, actions: [] };
+    await stampProgress(userId, projectId);
+    const note = toNullableString(body.note);
+    if (note) await addDailyLog(userId, `#${projectId} ${idea.name}: ${note}`);
+    return {
+      output: { ok: true, idea: { id: projectId, name: idea.name }, note_saved: Boolean(note) },
+      actions: [{ type: "logged_progress", id: projectId, name: idea.name }],
+    };
+  }
+
   return { output: { ok: false, error: `unknown tool: ${name}` }, actions: [] };
 }
 
@@ -347,6 +415,8 @@ export async function buildSystemPrompt(userId: number): Promise<string> {
     "- update_idea: change title, description, or status",
     "- add_tasks: append tasks to an existing idea by project_id",
     "- create_goal: add a north-star goal",
+    "- complete_task: mark a task done by its task id when the user says they finished it",
+    "- log_progress: stamp progress on an idea (and optionally save a note) when the user reports working on it",
     ""
   );
 
@@ -371,7 +441,7 @@ export async function buildSystemPrompt(userId: number): Promise<string> {
       if (idea.notes) lines.push(`    description: ${idea.notes}`);
       if (open.length) {
         lines.push(`    focus task: ${open[0]!.title}`);
-        lines.push(`    open tasks: ${open.map((t) => `"${t.title}"`).join("; ")}`);
+        lines.push(`    open tasks: ${open.map((t) => `[task ${t.id}] "${t.title}"`).join("; ")}`);
       } else if (idea.next_action) {
         lines.push(`    fallback action (no open tasks): ${idea.next_action}`);
       } else {
@@ -532,6 +602,124 @@ export async function suggestTasksFromMeetingNote(
   const text = extractText(response.content);
   const lines = parseSuggestionLines(text);
   return lines.slice(0, 8);
+}
+
+export interface CheckinOutcome {
+  completedTasks: { id: number; title: string; project: string }[];
+  progressedProjects: { id: number; name: string }[];
+}
+
+const CHECKIN_TOOL: Anthropic.Tool = {
+  name: "record_checkin",
+  description: "Record which tasks the user finished and which projects they progressed today.",
+  input_schema: {
+    type: "object",
+    properties: {
+      completed_task_ids: {
+        type: "array",
+        items: { type: "integer" },
+        description: "Task ids the user clearly finished today",
+      },
+      progressed_project_ids: {
+        type: "array",
+        items: { type: "integer" },
+        description: "Project ids the user worked on today without finishing a listed task",
+      },
+    },
+    required: ["completed_task_ids", "progressed_project_ids"],
+  },
+};
+
+function parseIdArray(v: unknown): number[] {
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0))];
+}
+
+/**
+ * Parse a free-text evening check-in and apply what it implies: mark tasks the
+ * user finished as done and stamp progress on projects they worked on.
+ * The raw check-in text is logged by the caller regardless.
+ */
+export async function processCheckin(
+  config: Config,
+  userId: number,
+  text: string
+): Promise<CheckinOutcome> {
+  if (!isAiConfigured(config)) {
+    throw new Error("AI not configured (set ANTHROPIC_API_KEY).");
+  }
+
+  const ideas = await getAllProjectsWithTasks(userId);
+  const relevant = ideas.filter((p) => p.status === "active" || p.status === "idea");
+  const contextLines: string[] = [];
+  for (const idea of relevant) {
+    const open = idea.tasks.filter((t) => !t.done);
+    contextLines.push(`- project ${idea.id}: ${idea.name}`);
+    for (const t of open) {
+      contextLines.push(`    task ${t.id}: ${t.title}`);
+    }
+  }
+
+  const client = new Anthropic({ apiKey: config.anthropicApiKey });
+  const response = await client.messages.create({
+    model: config.anthropicModel,
+    max_tokens: 512,
+    system: [
+      "You parse a user's evening check-in against their project list and record the outcome via the record_checkin tool.",
+      "Be conservative: only include a task id when the check-in clearly says that task was finished.",
+      "Include a project id in progressed_project_ids when the user worked on it but no listed task was clearly finished.",
+      "If nothing matches, call the tool with two empty arrays.",
+    ].join("\n"),
+    tools: [CHECKIN_TOOL],
+    tool_choice: { type: "tool", name: "record_checkin" },
+    messages: [
+      {
+        role: "user",
+        content: [
+          "Projects and open tasks:",
+          contextLines.length ? contextLines.join("\n") : "(none)",
+          "",
+          "Tonight's check-in:",
+          text,
+        ].join("\n"),
+      },
+    ],
+  });
+
+  const toolUse = response.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
+  );
+  const input =
+    toolUse?.input && typeof toolUse.input === "object"
+      ? (toolUse.input as Record<string, unknown>)
+      : {};
+
+  const outcome: CheckinOutcome = { completedTasks: [], progressedProjects: [] };
+  const projectById = new Map(relevant.map((p) => [p.id, p]));
+  const taskIndex = new Map(
+    relevant.flatMap((p) => p.tasks.filter((t) => !t.done).map((t) => [t.id, { task: t, project: p }] as const))
+  );
+
+  for (const taskId of parseIdArray(input.completed_task_ids)) {
+    const entry = taskIndex.get(taskId);
+    if (!entry) continue;
+    await updateProjectTask(userId, taskId, { done: true });
+    outcome.completedTasks.push({
+      id: taskId,
+      title: entry.task.title,
+      project: entry.project.name,
+    });
+  }
+
+  const alreadyStamped = new Set(outcome.completedTasks.map((t) => taskIndex.get(t.id)!.project.id));
+  for (const projectId of parseIdArray(input.progressed_project_ids)) {
+    const project = projectById.get(projectId);
+    if (!project || alreadyStamped.has(projectId)) continue;
+    await stampProgress(userId, projectId);
+    outcome.progressedProjects.push({ id: projectId, name: project.name });
+  }
+
+  return outcome;
 }
 
 export async function chat(
