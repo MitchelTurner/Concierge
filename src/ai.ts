@@ -4,13 +4,18 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Config } from "./config.js";
 import {
+  addContact,
   addDailyLog,
   addGoal,
   addMemory,
+  addOutreach,
   addProject,
   addProjectTask,
   deleteMemory,
   getAllProjectsWithTasks,
+  getContact,
+  getContactForProject,
+  getContacts,
   getGoals,
   getMeetingNotes,
   getMemories,
@@ -45,7 +50,9 @@ export interface ChatAction {
     | "completed_task"
     | "logged_progress"
     | "saved_memory"
-    | "forgot_memory";
+    | "forgot_memory"
+    | "added_contact"
+    | "drafted_email";
   id: number;
   name?: string;
   title?: string;
@@ -183,6 +190,40 @@ const TOOLS: Anthropic.Tool[] = [
         memory_id: { type: "integer" },
       },
       required: ["memory_id"],
+    },
+  },
+  {
+    name: "add_contact",
+    description:
+      "Save a client contact (name + email), optionally linked to a project so chase-up emails know who to write to.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        email: { type: "string" },
+        project_id: { type: "integer", description: "Project this contact belongs to" },
+        role: { type: "string", description: "e.g. 'owner, Joe's Pizza'" },
+      },
+      required: ["name", "email"],
+    },
+  },
+  {
+    name: "draft_client_email",
+    description:
+      "Draft a chase-up email to a client when something is blocking the pipeline (e.g. waiting on photos, content, or approval). Write the subject and body yourself — short, friendly, and specific about what is needed. The user reviews and sends it from Telegram.",
+    input_schema: {
+      type: "object",
+      properties: {
+        project_id: { type: "integer" },
+        contact_id: {
+          type: "integer",
+          description: "Contact to write to; omit to use the project's linked contact",
+        },
+        waiting_on: { type: "string", description: "What the user is waiting on, in a few words" },
+        subject: { type: "string" },
+        body: { type: "string", description: "Plain-text email body, ready to send" },
+      },
+      required: ["project_id", "waiting_on", "subject", "body"],
     },
   },
 ];
@@ -437,6 +478,74 @@ async function runTool(userId: number, name: string, input: unknown): Promise<To
     };
   }
 
+  if (name === "add_contact") {
+    const contactName = toNullableString(body.name);
+    const email = toNullableString(body.email);
+    if (!contactName || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return { output: { ok: false, error: "name and a valid email are required" }, actions: [] };
+    }
+    const projectId = toInt(body.project_id);
+    if (projectId !== null && !(await getProjectWithTasks(userId, projectId))) {
+      return { output: { ok: false, error: `no idea #${projectId}` }, actions: [] };
+    }
+    const contact = await addContact(userId, {
+      name: contactName,
+      email,
+      project_id: projectId,
+      role: toNullableString(body.role),
+    });
+    return {
+      output: { ok: true, contact: { id: contact.id, name: contact.name, email: contact.email } },
+      actions: [{ type: "added_contact", id: contact.id, name: contact.name }],
+    };
+  }
+
+  if (name === "draft_client_email") {
+    const projectId = toInt(body.project_id);
+    const waitingOn = toNullableString(body.waiting_on);
+    const subject = toNullableString(body.subject);
+    const emailBody = toNullableString(body.body);
+    if (projectId === null || !waitingOn || !subject || !emailBody) {
+      return {
+        output: { ok: false, error: "project_id, waiting_on, subject, and body are required" },
+        actions: [],
+      };
+    }
+    const project = await getProjectWithTasks(userId, projectId);
+    if (!project) return { output: { ok: false, error: `no idea #${projectId}` }, actions: [] };
+
+    const contactId = toInt(body.contact_id);
+    const contact =
+      contactId !== null
+        ? await getContact(userId, contactId)
+        : await getContactForProject(userId, projectId);
+    if (!contact) {
+      return {
+        output: {
+          ok: false,
+          error: `no contact linked to idea #${projectId} — ask the user for a name and email, then use add_contact first`,
+        },
+        actions: [],
+      };
+    }
+
+    const outreach = await addOutreach(userId, {
+      project_id: projectId,
+      contact_id: contact.id,
+      waiting_on: waitingOn,
+      subject,
+      body: emailBody,
+    });
+    return {
+      output: {
+        ok: true,
+        outreach: { id: outreach.id, to: contact.email, subject },
+        note: "Draft saved. The user will get a review message with send/edit buttons in Telegram.",
+      },
+      actions: [{ type: "drafted_email", id: outreach.id, name: contact.name }],
+    };
+  }
+
   return { output: { ok: false, error: `unknown tool: ${name}` }, actions: [] };
 }
 
@@ -471,6 +580,8 @@ export async function buildSystemPrompt(userId: number): Promise<string> {
     "- log_progress: stamp progress on an idea (and optionally save a note) when the user reports working on it",
     "- save_memory: remember a durable preference/fact the user shares (working hours, client quirks, standing rules)",
     "- forget_memory: remove a saved memory that is wrong or outdated",
+    "- add_contact: save a client contact (name + email), optionally linked to a project",
+    "- draft_client_email: when the user is blocked waiting on a client (photos, content, approval, payment), write a short friendly chase-up email; the user reviews and sends it from Telegram",
     ""
   );
 
@@ -536,6 +647,19 @@ export async function buildSystemPrompt(userId: number): Promise<string> {
   }
   if (stalled.length > 0) {
     lines.push(`- Stalling (${stallDays}+ days): ${stalled.map((p) => p.name).join("; ")}`);
+  }
+
+  const contacts = await getContacts(userId);
+  lines.push("");
+  lines.push("# Client contacts");
+  if (contacts.length === 0) {
+    lines.push("(none — save one with add_contact when the user mentions a client's name and email)");
+  } else {
+    for (const c of contacts) {
+      const project = c.project_id ? ` [idea #${c.project_id}]` : "";
+      const role = c.role ? ` — ${c.role}` : "";
+      lines.push(`- [contact ${c.id}] ${c.name} <${c.email}>${role}${project}`);
+    }
   }
 
   if (user?.calendar_ics_url) {
@@ -682,6 +806,170 @@ export async function suggestTasksFromMeetingNote(
   const text = extractText(response.content);
   const lines = parseSuggestionLines(text);
   return lines.slice(0, 8);
+}
+
+/**
+ * One-shot chase-up email generation for /draft. Uses project context and
+ * saved memories so tone and details fit the user.
+ */
+export async function draftOutreachEmail(
+  config: Config,
+  userId: number,
+  projectId: number,
+  contactName: string,
+  waitingOn: string
+): Promise<{ subject: string; body: string }> {
+  if (!isAiConfigured(config)) {
+    throw new Error("AI not configured (set ANTHROPIC_API_KEY).");
+  }
+
+  const user = await getUserById(userId);
+  const project = await getProjectWithTasks(userId, projectId);
+  if (!project) throw new Error(`no project #${projectId}`);
+  const memories = await getMemories(userId);
+
+  const draftTool: Anthropic.Tool = {
+    name: "email_draft",
+    description: "The chase-up email to send.",
+    input_schema: {
+      type: "object",
+      properties: {
+        subject: { type: "string" },
+        body: { type: "string", description: "Plain-text body, ready to send" },
+      },
+      required: ["subject", "body"],
+    },
+  };
+
+  const client = new Anthropic({ apiKey: config.anthropicApiKey });
+  const response = await client.messages.create({
+    model: config.anthropicModel,
+    max_tokens: 1024,
+    system: [
+      "You write short, friendly, professional chase-up emails to a freelancer's client when something is blocking progress.",
+      "Be specific about what is needed and why it unblocks the work. No guilt-tripping, no fluff, 4-8 sentences max.",
+      `Sign off as ${user?.name?.trim() || "the sender"}.`,
+    ].join("\n"),
+    tools: [draftTool],
+    tool_choice: { type: "tool", name: "email_draft" },
+    messages: [
+      {
+        role: "user",
+        content: [
+          `Project: ${project.name}`,
+          project.notes ? `About: ${project.notes}` : "",
+          `Client contact: ${contactName}`,
+          `Waiting on: ${waitingOn}`,
+          memories.length
+            ? `Things to keep in mind about the sender: ${memories
+                .slice(0, 10)
+                .map((m) => m.content)
+                .join("; ")}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      },
+    ],
+  });
+
+  const toolUse = response.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
+  );
+  const input =
+    toolUse?.input && typeof toolUse.input === "object"
+      ? (toolUse.input as Record<string, unknown>)
+      : {};
+  const subject = toNullableString(input.subject);
+  const body = toNullableString(input.body);
+  if (!subject || !body) throw new Error("AI draft returned no subject/body");
+  return { subject, body };
+}
+
+/** One-shot revision of an outreach draft from free-text instructions. */
+export async function reviseOutreachEmail(
+  config: Config,
+  current: { subject: string; body: string },
+  instructions: string
+): Promise<{ subject: string; body: string }> {
+  if (!isAiConfigured(config)) {
+    throw new Error("AI not configured (set ANTHROPIC_API_KEY).");
+  }
+
+  const reviseTool: Anthropic.Tool = {
+    name: "email_draft",
+    description: "The revised email.",
+    input_schema: {
+      type: "object",
+      properties: {
+        subject: { type: "string" },
+        body: { type: "string", description: "Plain-text body, ready to send" },
+      },
+      required: ["subject", "body"],
+    },
+  };
+
+  const client = new Anthropic({ apiKey: config.anthropicApiKey });
+  const response = await client.messages.create({
+    model: config.anthropicModel,
+    max_tokens: 1024,
+    system:
+      "You revise a chase-up email according to the user's instructions. Keep it short, friendly, and professional. If the user's message reads like a complete replacement email, use their text nearly verbatim (fixing only obvious typos).",
+    tools: [reviseTool],
+    tool_choice: { type: "tool", name: "email_draft" },
+    messages: [
+      {
+        role: "user",
+        content: [
+          `Current subject: ${current.subject}`,
+          "Current body:",
+          current.body,
+          "",
+          "Revision instructions:",
+          instructions,
+        ].join("\n"),
+      },
+    ],
+  });
+
+  const toolUse = response.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
+  );
+  const input =
+    toolUse?.input && typeof toolUse.input === "object"
+      ? (toolUse.input as Record<string, unknown>)
+      : {};
+  const subject = toNullableString(input.subject) ?? current.subject;
+  const body = toNullableString(input.body) ?? current.body;
+  return { subject, body };
+}
+
+/**
+ * One-shot assessment of a client reply: does it provide (or promise) what the
+ * user was waiting on? Returns a single short line for the notification.
+ */
+export async function assessReply(
+  config: Config,
+  waitingOn: string,
+  replyText: string
+): Promise<string> {
+  if (!isAiConfigured(config)) {
+    throw new Error("AI not configured (set ANTHROPIC_API_KEY).");
+  }
+  const client = new Anthropic({ apiKey: config.anthropicApiKey });
+  const response = await client.messages.create({
+    model: config.anthropicModel,
+    max_tokens: 128,
+    system:
+      "You read a client's email reply and judge whether it delivers or promises what the user was waiting on. Answer in ONE short line, e.g. \"Looks like they attached the photos.\" or \"They haven't sent it yet — they're asking a question.\" No preamble.",
+    messages: [
+      {
+        role: "user",
+        content: `Waiting on: ${waitingOn}\n\nClient reply:\n${replyText.slice(0, 2000)}`,
+      },
+    ],
+  });
+  return extractText(response.content);
 }
 
 export interface CheckinOutcome {
