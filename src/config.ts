@@ -51,6 +51,18 @@ export interface Config {
   openaiApiKey: string;
   /** OpenAI transcription model id. */
   openaiTranscribeModel: string;
+  /** SMTP settings for sending client outreach emails. Empty host = sending disabled. */
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPass: string;
+  /** From address for outgoing mail, e.g. "Alex <alex@example.com>". */
+  smtpFrom: string;
+  /** IMAP settings for detecting client replies. Empty host = reply detection disabled. */
+  imapHost: string;
+  imapPort: number;
+  imapUser: string;
+  imapPass: string;
   /** HTTP port for the web dashboard (Railway sets PORT). */
   port: number;
   /** Default timezone for new accounts (users can override in settings). */
@@ -74,6 +86,16 @@ function requireEnv(name: string): string {
     );
   }
   return value.trim();
+}
+
+function parseOptionalPort(name: string, fallback: number): number {
+  const raw = (process.env[name] ?? "").trim();
+  if (raw === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    throw new Error(`${name} must be a valid port number (got "${raw}").`);
+  }
+  return n;
 }
 
 function parseTime(name: string, fallback: string): string {
@@ -108,6 +130,17 @@ export function loadConfig(): Config {
   const openaiApiKey = (process.env.OPENAI_API_KEY ?? "").trim();
   const openaiTranscribeModel = (process.env.OPENAI_TRANSCRIBE_MODEL ?? "whisper-1").trim();
 
+  const smtpHost = (process.env.SMTP_HOST ?? "").trim();
+  const smtpPort = parseOptionalPort("SMTP_PORT", 587);
+  const smtpUser = (process.env.SMTP_USER ?? "").trim();
+  const smtpPass = (process.env.SMTP_PASS ?? "").trim();
+  const smtpFrom = (process.env.SMTP_FROM ?? smtpUser).trim();
+
+  const imapHost = (process.env.IMAP_HOST ?? "").trim();
+  const imapPort = parseOptionalPort("IMAP_PORT", 993);
+  const imapUser = (process.env.IMAP_USER ?? smtpUser).trim();
+  const imapPass = (process.env.IMAP_PASS ?? smtpPass).trim();
+
   const portRaw = (process.env.PORT ?? "3000").trim();
   const port = Number(portRaw);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -123,6 +156,15 @@ export function loadConfig(): Config {
     anthropicModel,
     openaiApiKey,
     openaiTranscribeModel,
+    smtpHost,
+    smtpPort,
+    smtpUser,
+    smtpPass,
+    smtpFrom,
+    imapHost,
+    imapPort,
+    imapUser,
+    imapPass,
     port,
     defaultTz,
     defaultDailyTime,
