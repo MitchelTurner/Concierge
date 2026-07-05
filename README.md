@@ -117,6 +117,7 @@ CHECKIN_TIME=20:00                      # default for new signups
 STALL_DAYS=4                            # default stall threshold
 TZ=America/Chicago                      # default timezone for new signups
 ANTHROPIC_API_KEY=                      # optional — enables AI assistant
+OPENAI_API_KEY=                         # optional — enables Telegram voice-note transcription
 ```
 
 ### 5. Sign up and link Telegram
@@ -196,6 +197,7 @@ across deploys.
    STALL_DAYS=4
    TZ=America/Chicago
    ANTHROPIC_API_KEY=sk-ant-...          # optional — AI assistant
+   OPENAI_API_KEY=sk-...                 # optional — voice-note transcription
    ```
 
 4. **Expose the dashboard.** *Settings → Networking → Generate Domain*.
@@ -243,6 +245,20 @@ add a task to follow up with the client Friday"* just works from your phone.
 Conversation history is kept in memory per chat (cleared on restart or
 `/reset`).
 
+**Send voice notes.** When `OPENAI_API_KEY` is set, a Telegram voice message is
+transcribed, saved as a call note, and (with the AI assistant enabled) mined
+for suggested follow-up tasks. The transcript is seeded into the assistant
+conversation, so replying *"add those to project 3"* saves the tasks.
+
+**Morning nudge buttons.** The daily focus message ships with inline buttons:
+**✅ On it** (commit to the task), **🔁 Swap task** (get the next-best
+alternative from a different project), and **😴 Not today** (skip guilt-free).
+
+**Proactive alerts.** Outside the fixed schedule, the bot checks hourly
+(9:00–20:59 local) and pings you when a project's deadline enters the 3-day
+window or an active project crosses your stall threshold. Each alert fires
+once per condition — progress on a project re-arms its stall alert.
+
 ## Web dashboard
 
 Sign up with email/password. Each account has isolated projects, goals, and
@@ -273,6 +289,14 @@ state.
   sharpen each next action", or "draft this new project and save it".
 - Conversation history is kept in the browser session (not persisted
   server-side) and the most recent turns are sent with each request.
+- **Memory.** Tell the assistant "remember that I only work on the business
+  after 8pm" and it saves the fact to a per-user `user_memory` table (via the
+  `save_memory` tool). Memories are included in every future chat — dashboard
+  and Telegram — and can be reviewed or removed in Settings, or by asking the
+  assistant to forget them.
+- **Calendar context.** If a calendar ICS URL is set in Settings, the assistant
+  sees today's events alongside your portfolio, so "what should I do today?"
+  accounts for your meetings.
 
 Run locally:
 
@@ -300,6 +324,7 @@ API (authenticated routes require `Authorization: Bearer <token>`):
 | `GET /api/daily-log` | Recent progress log entries (Telegram check-ins & `/progress`) |
 | `GET /api/goals` · `POST /api/goals` | List / create goals |
 | `PATCH /api/goals/:id` · `DELETE /api/goals/:id` | Edit / delete a goal |
+| `GET /api/memories` · `DELETE /api/memories/:id` | List / remove assistant memories |
 | `GET /api/chat/status` | Whether the AI agent is enabled + its model |
 | `POST /api/chat` | Send `{ messages: [{role, content}] }`, get `{ reply }` |
 
@@ -307,6 +332,10 @@ API (authenticated routes require `Authorization: Bearer <token>`):
 
 ```
 ☀️ Today's focus
+
+📅 Today: 2 events, ~1.5h booked
+• 09:00–09:30 Standup
+• 13:00–14:00 Dentist
 
 ⏰ Heads up:
 • Joe's Pizza website (#1) — due in 2d
@@ -326,6 +355,10 @@ Reply /done {id} when you finish something.
 • Niche affiliate blog (#3) — 9 days since progress
 Passive projects: quietly letting them rot is how they die.
 ```
+
+The calendar section appears only when an ICS URL is configured in Settings.
+On Telegram the message also carries **On it / Swap task / Not today** inline
+buttons.
 
 ## Progress-based accountability
 
@@ -365,8 +398,11 @@ concierge/
     auth.ts        # signup/login, sessions, password hashing
     scoring.ts     # score() + allocateDay() — core prioritization logic
     messages.ts    # daily message + list formatting (shared by bot & scheduler)
-    bot.ts         # Telegraf commands (/add wizard, check-in, /time) + AI free-text chat
-    scheduler.ts   # per-user timezone cron → daily nudge, evening check-in, weekly review
+    bot.ts         # Telegraf commands (/add wizard, check-in, /time), voice notes, AI free-text chat
+    scheduler.ts   # per-user timezone cron → nudges, weekly review, proactive alerts
+    alerts.ts      # event-driven deadline/stall pings (once per condition)
+    calendar.ts    # ICS feed fetch/parse → today's events (nudge + AI context)
+    transcribe.ts  # OpenAI voice-note transcription (optional)
     server.ts      # Express API + static dashboard
     ai.ts          # Anthropic assistant with live context + tools
     daily.ts       # one-shot: send allocation to one user and exit
@@ -459,10 +495,11 @@ Table `goals` (edited from the web dashboard):
   (dashboard **Assistant** tab *and* free-text Telegram chat), AI-parsed
   check-ins, and `/time {minutes}` to tailor suggestions to tonight's available
   time. Still open: having the agent rewrite the formula-based allocation.
-- **Phase 3:** weekly review summary is built (scheduled + `/review`); calendar
-  awareness is still open. (An editable web dashboard — beyond the
-  originally-planned read-only one — is also built; see
-  [Web dashboard](#web-dashboard).)
+- **Phase 3 (done):** weekly review summary (scheduled + `/review`), calendar
+  awareness (ICS feed in the nudge and AI context), assistant memory, voice
+  notes, proactive deadline/stall alerts, and inline nudge buttons. (An
+  editable web dashboard — beyond the originally-planned read-only one — is
+  also built; see [Web dashboard](#web-dashboard).)
 
 ## Contributing
 

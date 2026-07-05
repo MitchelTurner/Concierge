@@ -39,9 +39,22 @@ DATABASE_SSL=false
 | `stall_days` | INTEGER | days without progress = stalling |
 | `weekly_review_day` | INTEGER | 0 (Sunday) – 6 (Saturday) for the weekly review |
 | `weekly_review_time` | TEXT | `HH:MM` for the weekly review |
+| `calendar_ics_url` | TEXT | nullable — optional ICS feed for calendar awareness |
 | `last_daily_nudge_date` | DATE | prevents duplicate daily sends |
 | `last_checkin_nudge_date` | DATE | prevents duplicate check-in sends |
 | `last_weekly_review_date` | DATE | prevents duplicate weekly review sends |
+
+### `user_memory`
+
+Durable facts and preferences the AI assistant saved about the user (via the
+`save_memory` tool). Included in every chat's system prompt; manageable from
+Settings or the `forget_memory` tool.
+
+| column | type | notes |
+| --- | --- | --- |
+| `id` | SERIAL | PK |
+| `user_id` | INTEGER | FK → users, cascade delete |
+| `content` | TEXT | one short sentence |
 
 ### `sessions`
 

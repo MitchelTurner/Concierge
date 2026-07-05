@@ -18,7 +18,8 @@ High-level map of how **Concierge** runs as a single Node process.
              │              │
              │              └── every minute: for each linked user,
              │                  compare local time → send daily / check-in /
-             │                  weekly review
+             │                  weekly review; hourly → proactive
+             │                  deadline & stall alerts
              │
              └── Telegraf long-polling + command handlers
 ```
@@ -45,10 +46,13 @@ Business logic is centralized in `scoring.ts` and reused everywhere:
 | `auth.ts` | Signup/login, bcrypt passwords, bearer session tokens |
 | `scoring.ts` | `score()`, `allocateDay()`, `planTimebox()`, deadline/stall date math |
 | `messages.ts` | `formatDailyMessage()`, `formatProjectList()`, time-box + weekly review text |
-| `bot.ts` | Telegram commands, guided `/add` wizard, check-in sessions, AI free-text chat |
-| `scheduler.ts` | Minute cron → per-user timezone nudges + weekly review (deduped by date) |
+| `bot.ts` | Telegram commands, guided `/add` wizard, check-in sessions, voice notes, AI free-text chat |
+| `scheduler.ts` | Minute cron → per-user timezone nudges + weekly review (deduped by date), hourly alerts |
+| `alerts.ts` | Proactive deadline/stall pings, deduped via one-shot `app_meta` claims |
+| `calendar.ts` | ICS feed fetch (cached) + parse → today's events for nudges and AI context |
+| `transcribe.ts` | Optional OpenAI transcription for Telegram voice notes |
 | `server.ts` | REST API under `/api/*`, serves `public/index.html` |
-| `ai.ts` | Anthropic chat with live DB context + tools, check-in parsing |
+| `ai.ts` | Anthropic chat with live DB context + tools, memory, check-in parsing |
 | `daily.ts` | One-shot CLI: send today's message to one user and exit |
 
 ## Data flow examples
