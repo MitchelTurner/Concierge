@@ -62,6 +62,63 @@ export interface UserMemory {
   updated_at: string;
 }
 
+/** A client contact, optionally linked to a project. */
+export interface Contact {
+  id: number;
+  user_id: number;
+  project_id: number | null;
+  name: string;
+  email: string;
+  role: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NewContact {
+  name: string;
+  email: string;
+  project_id?: number | null;
+  role?: string | null;
+  notes?: string | null;
+}
+
+export interface ContactPatch {
+  name?: string;
+  email?: string;
+  project_id?: number | null;
+  role?: string | null;
+  notes?: string | null;
+}
+
+export type OutreachStatus = "draft" | "sent" | "replied" | "cancelled";
+
+/** A chase-up email to a client about something blocking the pipeline. */
+export interface Outreach {
+  id: number;
+  user_id: number;
+  project_id: number;
+  contact_id: number;
+  /** What the user is waiting on, e.g. "photos of the finished kitchen". */
+  waiting_on: string;
+  subject: string;
+  body: string;
+  status: OutreachStatus;
+  smtp_message_id: string | null;
+  sent_at: string | null;
+  replied_at: string | null;
+  reply_snippet: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Outreach joined with its contact and project name (for matching and display). */
+export interface OutreachWithContext extends Outreach {
+  contact_name: string;
+  contact_email: string;
+  project_name: string;
+}
+
 export interface Project {
   id: number;
   user_id: number;
@@ -255,6 +312,42 @@ CREATE TABLE IF NOT EXISTS user_memory (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_memory_user_id ON user_memory(user_id);
+
+CREATE TABLE IF NOT EXISTS contacts (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  role TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_contacts_user_id ON contacts(user_id);
+CREATE INDEX IF NOT EXISTS idx_contacts_project_id ON contacts(project_id);
+
+CREATE TABLE IF NOT EXISTS outreach (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+  waiting_on TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft','sent','replied','cancelled')),
+  smtp_message_id TEXT,
+  sent_at TIMESTAMPTZ,
+  replied_at TIMESTAMPTZ,
+  reply_snippet TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_outreach_user_id ON outreach(user_id);
+CREATE INDEX IF NOT EXISTS idx_outreach_status ON outreach(status);
 
 CREATE TABLE IF NOT EXISTS sessions (
   id SERIAL PRIMARY KEY,
@@ -626,6 +719,22 @@ export async function claimOnce(key: string): Promise<boolean> {
 
 export async function releaseClaim(key: string): Promise<void> {
   await getPool().query("DELETE FROM app_meta WHERE key = $1", [key]);
+}
+
+export async function getAppMeta(key: string): Promise<string | undefined> {
+  const result = await getPool().query<{ value: string }>(
+    "SELECT value FROM app_meta WHERE key = $1",
+    [key]
+  );
+  return result.rows[0]?.value;
+}
+
+export async function setAppMeta(key: string, value: string): Promise<void> {
+  await getPool().query(
+    `INSERT INTO app_meta (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [key, value]
+  );
 }
 
 // --- Sessions ---
@@ -1095,6 +1204,208 @@ export async function deleteMemory(userId: number, id: number): Promise<boolean>
     [userId, id]
   );
   return (result.rowCount ?? 0) > 0;
+}
+
+// --- Contacts ---
+
+export async function getContacts(userId: number): Promise<Contact[]> {
+  const result = await getPool().query<Contact>(
+    "SELECT * FROM contacts WHERE user_id = $1 ORDER BY id",
+    [userId]
+  );
+  return result.rows;
+}
+
+export async function getContact(userId: number, id: number): Promise<Contact | undefined> {
+  const result = await getPool().query<Contact>(
+    "SELECT * FROM contacts WHERE user_id = $1 AND id = $2",
+    [userId, id]
+  );
+  return result.rows[0];
+}
+
+/** Contact linked to a project (first match), used as the default outreach recipient. */
+export async function getContactForProject(
+  userId: number,
+  projectId: number
+): Promise<Contact | undefined> {
+  const result = await getPool().query<Contact>(
+    "SELECT * FROM contacts WHERE user_id = $1 AND project_id = $2 ORDER BY id LIMIT 1",
+    [userId, projectId]
+  );
+  return result.rows[0];
+}
+
+export async function addContact(userId: number, c: NewContact): Promise<Contact> {
+  const result = await getPool().query<Contact>(
+    `INSERT INTO contacts (user_id, project_id, name, email, role, notes)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING *`,
+    [
+      userId,
+      c.project_id ?? null,
+      c.name.trim(),
+      c.email.trim().toLowerCase(),
+      c.role?.trim() || null,
+      c.notes?.trim() || null,
+    ]
+  );
+  return result.rows[0];
+}
+
+export async function updateContact(
+  userId: number,
+  id: number,
+  patch: ContactPatch
+): Promise<Contact | undefined> {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  let i = 1;
+
+  if (patch.name !== undefined) {
+    sets.push(`name = $${i++}`);
+    params.push(patch.name.trim());
+  }
+  if (patch.email !== undefined) {
+    sets.push(`email = $${i++}`);
+    params.push(patch.email.trim().toLowerCase());
+  }
+  if (patch.project_id !== undefined) {
+    sets.push(`project_id = $${i++}`);
+    params.push(patch.project_id);
+  }
+  if (patch.role !== undefined) {
+    sets.push(`role = $${i++}`);
+    params.push(patch.role);
+  }
+  if (patch.notes !== undefined) {
+    sets.push(`notes = $${i++}`);
+    params.push(patch.notes);
+  }
+  if (sets.length === 0) return getContact(userId, id);
+
+  sets.push("updated_at = NOW()");
+  params.push(userId, id);
+
+  const result = await getPool().query<Contact>(
+    `UPDATE contacts SET ${sets.join(", ")} WHERE user_id = $${i} AND id = $${i + 1} RETURNING *`,
+    params
+  );
+  return result.rows[0];
+}
+
+export async function deleteContact(userId: number, id: number): Promise<boolean> {
+  const result = await getPool().query(
+    "DELETE FROM contacts WHERE user_id = $1 AND id = $2",
+    [userId, id]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+// --- Outreach (client chase-up emails) ---
+
+const OUTREACH_CONTEXT_SELECT = `
+  SELECT o.*, c.name AS contact_name, c.email AS contact_email, p.name AS project_name
+  FROM outreach o
+  JOIN contacts c ON c.id = o.contact_id
+  JOIN projects p ON p.id = o.project_id`;
+
+export async function addOutreach(
+  userId: number,
+  draft: {
+    project_id: number;
+    contact_id: number;
+    waiting_on: string;
+    subject: string;
+    body: string;
+  }
+): Promise<Outreach> {
+  const result = await getPool().query<Outreach>(
+    `INSERT INTO outreach (user_id, project_id, contact_id, waiting_on, subject, body)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING *`,
+    [userId, draft.project_id, draft.contact_id, draft.waiting_on, draft.subject, draft.body]
+  );
+  return result.rows[0];
+}
+
+export async function getOutreach(
+  userId: number,
+  id: number
+): Promise<OutreachWithContext | undefined> {
+  const result = await getPool().query<OutreachWithContext>(
+    `${OUTREACH_CONTEXT_SELECT} WHERE o.user_id = $1 AND o.id = $2`,
+    [userId, id]
+  );
+  return result.rows[0];
+}
+
+/** A user's drafts and sent-but-unanswered outreach, newest first. */
+export async function getOpenOutreach(userId: number): Promise<OutreachWithContext[]> {
+  const result = await getPool().query<OutreachWithContext>(
+    `${OUTREACH_CONTEXT_SELECT}
+     WHERE o.user_id = $1 AND o.status IN ('draft', 'sent')
+     ORDER BY o.id DESC`,
+    [userId]
+  );
+  return result.rows;
+}
+
+/** All sent outreach across users — the inbox watcher matches replies against these. */
+export async function getAllSentOutreach(): Promise<OutreachWithContext[]> {
+  const result = await getPool().query<OutreachWithContext>(
+    `${OUTREACH_CONTEXT_SELECT} WHERE o.status = 'sent' ORDER BY o.sent_at DESC`
+  );
+  return result.rows;
+}
+
+export async function updateOutreach(
+  userId: number,
+  id: number,
+  patch: {
+    subject?: string;
+    body?: string;
+    status?: OutreachStatus;
+    smtp_message_id?: string | null;
+    sent_at?: string | null;
+    replied_at?: string | null;
+    reply_snippet?: string | null;
+  }
+): Promise<Outreach | undefined> {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  let i = 1;
+
+  for (const key of [
+    "subject",
+    "body",
+    "status",
+    "smtp_message_id",
+    "sent_at",
+    "replied_at",
+    "reply_snippet",
+  ] as const) {
+    if (patch[key] !== undefined) {
+      sets.push(`${key} = $${i++}`);
+      params.push(patch[key]);
+    }
+  }
+  if (sets.length === 0) {
+    const result = await getPool().query<Outreach>(
+      "SELECT * FROM outreach WHERE user_id = $1 AND id = $2",
+      [userId, id]
+    );
+    return result.rows[0];
+  }
+
+  sets.push("updated_at = NOW()");
+  params.push(userId, id);
+
+  const result = await getPool().query<Outreach>(
+    `UPDATE outreach SET ${sets.join(", ")} WHERE user_id = $${i} AND id = $${i + 1} RETURNING *`,
+    params
+  );
+  return result.rows[0];
 }
 
 // --- Meeting notes ---
