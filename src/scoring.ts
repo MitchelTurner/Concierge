@@ -98,6 +98,15 @@ function deadlineWarnings(projects: ProjectWithTasks[]): Project[] {
     .sort((a, b) => (daysUntil(a.deadline!) ?? Infinity) - (daysUntil(b.deadline!) ?? Infinity));
 }
 
+/** Projects that could be today's focus — income first, best score first. */
+export function rankAllocatable(projects: ProjectWithTasks[]): ProjectWithTasks[] {
+  const ranked = rankProjects(projects);
+  return [
+    ...ranked.filter((p) => p.type === "fast" && isAllocatable(p)),
+    ...ranked.filter((p) => p.type === "passive" && isAllocatable(p)),
+  ];
+}
+
 export interface TimeboxItem {
   project: Project;
   /** Concrete task title (or the project's next_action fallback). */

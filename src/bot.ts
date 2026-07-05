@@ -6,13 +6,15 @@
  * evening check-in) keyed by Telegram chat id. Free text outside a session is
  * routed to the AI assistant (when configured) with per-chat history.
  */
-import { Telegraf } from "telegraf";
+import { Markup, Telegraf } from "telegraf";
 import { message } from "telegraf/filters";
 import type { Config } from "./config.js";
 import {
+  addMeetingNote,
   addProject,
   addProjectTask,
   addDailyLog,
+  getAllProjectsWithTasks,
   getProjectWithTasks,
   getUserByTelegramChatId,
   linkTelegramByCode,
@@ -32,7 +34,16 @@ import {
   formatTimeboxMessage,
   formatWeeklyReview,
 } from "./messages.js";
-import { chat, isAiConfigured, processCheckin, type ChatAction, type ChatMessage } from "./ai.js";
+import { allocateDay, rankAllocatable } from "./scoring.js";
+import {
+  chat,
+  isAiConfigured,
+  processCheckin,
+  suggestTasksFromMeetingNote,
+  type ChatAction,
+  type ChatMessage,
+} from "./ai.js";
+import { isTranscriptionConfigured, transcribeAudio } from "./transcribe.js";
 
 const SETTABLE_STATUSES: ProjectStatus[] = [...PROJECT_STATUSES];
 
@@ -66,11 +77,17 @@ const TELEGRAM_MAX_REPLY = 4000;
 /** Turns of assistant conversation kept per chat (user + assistant messages). */
 const MAX_CHAT_HISTORY = 20;
 
+/** Telegram voice notes above this size are rejected before download. */
+const MAX_VOICE_BYTES = 20 * 1024 * 1024;
+/** Transcript preview length in the confirmation reply. */
+const TRANSCRIPT_PREVIEW = 600;
+
 export interface ConciergeBot {
   bot: Telegraf;
   sendDailyMessage: (user: User) => Promise<void>;
   sendCheckinMessage: (user: User) => Promise<void>;
   sendWeeklyReview: (user: User) => Promise<void>;
+  sendAlert: (user: User, text: string) => Promise<void>;
 }
 
 function describeAction(a: ChatAction): string {
@@ -87,6 +104,10 @@ function describeAction(a: ChatAction): string {
       return `Marked done: "${a.title}"`;
     case "logged_progress":
       return `Logged progress on "${a.name}"`;
+    case "saved_memory":
+      return `Remembered: "${a.title}"`;
+    case "forgot_memory":
+      return `Forgot memory #${a.id}`;
   }
 }
 
@@ -135,6 +156,12 @@ export function createBot(config: Config): ConciergeBot {
       lines.push(
         "",
         "Or just talk to me — e.g. \u201cadd a task to invoice the client\u201d or \u201cwhat should I work on?\u201d. /reset clears our conversation."
+      );
+    }
+    if (isTranscriptionConfigured(config)) {
+      lines.push(
+        "",
+        "\uD83C\uDF99 Send a voice note after a call — I'll transcribe it, save it as a note, and suggest follow-up tasks."
       );
     }
     await ctx.reply(lines.join("\n"));
@@ -340,6 +367,121 @@ export function createBot(config: Config): ConciergeBot {
     }
   });
 
+  // Inline buttons on the morning nudge.
+  bot.action(/^nudge_onit:(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery("Locked in \uD83D\uDCAA");
+    const id = Number(ctx.match[1]);
+    await ctx.reply(`\uD83D\uDCAA Locked in. /done ${id} when you finish.`);
+  });
+
+  bot.action(/^nudge_swap:(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery();
+    const chatId = ctx.chat?.id?.toString();
+    if (!chatId) return;
+    const user = await getUserByTelegramChatId(chatId);
+    if (!user) return;
+    const excludeId = Number(ctx.match[1]);
+    const all = await getAllProjectsWithTasks(user.id);
+    const alt = rankAllocatable(all).find((p) => p.id !== excludeId);
+    if (!alt) {
+      await ctx.reply(
+        "No other project is ready to work on. Stick with the plan, rest, or /add something new."
+      );
+      return;
+    }
+    const action = alt.tasks.find((t) => !t.done)?.title ?? alt.next_action ?? "(add a next action)";
+    await ctx.reply(
+      [
+        `\uD83D\uDD01 Swap: ${alt.name} (#${alt.id})`,
+        `\u2192 ${action}`,
+        "",
+        `/done ${alt.id} when you finish.`,
+      ].join("\n")
+    );
+  });
+
+  bot.action("nudge_skip", async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      "\uD83D\uDE34 Fair enough — rest is part of the plan. Tomorrow's nudge will pick this back up."
+    );
+  });
+
+  // Voice notes → transcribe → meeting note → suggested follow-up tasks.
+  bot.on(message("voice"), async (ctx) => {
+    const user = await requireLinkedUser(ctx);
+    if (!user) return;
+
+    if (!isTranscriptionConfigured(config)) {
+      await ctx.reply(
+        "Voice notes need transcription — set OPENAI_API_KEY on the server to enable them, or type the note instead."
+      );
+      return;
+    }
+
+    const voice = ctx.message.voice;
+    if (voice.file_size && voice.file_size > MAX_VOICE_BYTES) {
+      await ctx.reply("That voice note is too large (20 MB max). Try a shorter one.");
+      return;
+    }
+
+    await ctx.sendChatAction("typing");
+    try {
+      const link = await ctx.telegram.getFileLink(voice.file_id);
+      const res = await fetch(link.href);
+      if (!res.ok) throw new Error(`voice file download failed (${res.status})`);
+      const audio = await res.arrayBuffer();
+      const transcript = await transcribeAudio(
+        config,
+        audio,
+        "voice.ogg",
+        voice.mime_type ?? "audio/ogg"
+      );
+
+      const note = await addMeetingNote(user.id, {
+        title: `Voice note ${new Date().toISOString().slice(0, 10)}`,
+        body: transcript,
+        type: "call",
+      });
+
+      const preview =
+        transcript.length > TRANSCRIPT_PREVIEW
+          ? `${transcript.slice(0, TRANSCRIPT_PREVIEW)}…`
+          : transcript;
+      const parts = [`\uD83C\uDF99 Transcribed and saved as note #${note.id}:`, "", preview];
+
+      if (isAiConfigured(config)) {
+        try {
+          const tasks = await suggestTasksFromMeetingNote(config, user.id, note);
+          if (tasks.length) {
+            parts.push("", "Suggested follow-ups:", ...tasks.map((t) => `\u2022 ${t}`));
+            parts.push("", 'Say e.g. "add those to project 3" and I\u2019ll save them.');
+            // Seed the assistant conversation so "add those" resolves.
+            const chatId = ctx.chat.id.toString();
+            const history = chatHistories.get(chatId) ?? [];
+            history.push(
+              { role: "user", content: `(voice note, transcribed) ${transcript}` },
+              {
+                role: "assistant",
+                content: `Saved as note #${note.id}. Suggested follow-up tasks:\n${tasks
+                  .map((t) => `- ${t}`)
+                  .join("\n")}`,
+              }
+            );
+            chatHistories.set(chatId, history.slice(-MAX_CHAT_HISTORY));
+          }
+        } catch (err) {
+          console.error("[bot] voice note task extraction failed:", err);
+        }
+      }
+
+      await ctx.reply(parts.join("\n").slice(0, TELEGRAM_MAX_REPLY));
+    } catch (err) {
+      console.error("[bot] voice note failed:", err);
+      await ctx.reply("Couldn't process that voice note — try again, or type it instead.");
+    }
+  });
+
   // Free-text handler: active sessions (wizard, check-in) win; anything else
   // goes to the AI assistant when it is configured.
   bot.on(message("text"), async (ctx) => {
@@ -402,10 +544,19 @@ export function createBot(config: Config): ConciergeBot {
 
   const sendDailyMessage = async (user: User): Promise<void> => {
     if (!user.telegram_chat_id) return;
-    await bot.telegram.sendMessage(
-      user.telegram_chat_id,
-      await formatDailyMessage(user.id, user.stall_days)
-    );
+    const all = await getAllProjectsWithTasks(user.id);
+    const alloc = allocateDay(all);
+    const text = await formatDailyMessage(user.id, user.stall_days, alloc, all);
+    const keyboard = alloc.primary
+      ? Markup.inlineKeyboard([
+          [Markup.button.callback("\u2705 On it", `nudge_onit:${alloc.primary.project.id}`)],
+          [
+            Markup.button.callback("\uD83D\uDD01 Swap task", `nudge_swap:${alloc.primary.project.id}`),
+            Markup.button.callback("\uD83D\uDE34 Not today", "nudge_skip"),
+          ],
+        ])
+      : undefined;
+    await bot.telegram.sendMessage(user.telegram_chat_id, text, keyboard);
   };
 
   const sendCheckinMessage = async (user: User): Promise<void> => {
@@ -428,7 +579,12 @@ export function createBot(config: Config): ConciergeBot {
     );
   };
 
-  return { bot, sendDailyMessage, sendCheckinMessage, sendWeeklyReview };
+  const sendAlert = async (user: User, text: string): Promise<void> => {
+    if (!user.telegram_chat_id) return;
+    await bot.telegram.sendMessage(user.telegram_chat_id, text);
+  };
+
+  return { bot, sendDailyMessage, sendCheckinMessage, sendWeeklyReview, sendAlert };
 }
 
 /**

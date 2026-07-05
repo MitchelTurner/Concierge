@@ -2,11 +2,13 @@
  * Telegram message formatting for scored projects and tasks.
  */
 import { allocateDay, daysSince, daysUntil, planTimebox, type DayAllocation } from "./scoring.js";
+import { formatEventLines, getTodaysEvents, totalBusyHours } from "./calendar.js";
 import {
   getAllProjectsWithTasks,
   getDailyLogSince,
   getStalledProjects,
   getTasksCompletedSince,
+  getUserById,
   type ProjectWithTasks,
 } from "./db.js";
 
@@ -33,6 +35,26 @@ export async function buildStallSection(
   return lines.join("\n");
 }
 
+/** Today's calendar events as message lines, or null when no feed is set / it fails. */
+async function buildCalendarSection(userId: number): Promise<string[] | null> {
+  const user = await getUserById(userId);
+  if (!user?.calendar_ics_url) return null;
+  try {
+    const events = await getTodaysEvents(user.calendar_ics_url, user.timezone);
+    if (events.length === 0) {
+      return ["\uD83D\uDCC5 Calendar clear today — good day for deep work."];
+    }
+    const busy = totalBusyHours(events);
+    const header = busy > 0
+      ? `\uD83D\uDCC5 Today: ${events.length} event${events.length === 1 ? "" : "s"}, ~${busy}h booked`
+      : `\uD83D\uDCC5 Today: ${events.length} event${events.length === 1 ? "" : "s"}`;
+    return [header, ...formatEventLines(events, user.timezone)];
+  } catch (err) {
+    console.error(`[calendar] feed fetch failed for user #${userId}:`, err);
+    return null;
+  }
+}
+
 export async function formatDailyMessage(
   userId: number,
   stallDays: number | null = null,
@@ -42,6 +64,12 @@ export async function formatDailyMessage(
   const all = projectsWithTasks ?? (await getAllProjectsWithTasks(userId));
   const alloc = allocation ?? allocateDay(all);
   const lines: string[] = ["\u2600\uFE0F Today's focus", ""];
+
+  const calendarSection = await buildCalendarSection(userId);
+  if (calendarSection) {
+    lines.push(...calendarSection);
+    lines.push("");
+  }
 
   if (alloc.deadlineWarnings.length > 0) {
     lines.push("\u23F0 Heads up:");
