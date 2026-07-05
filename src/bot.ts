@@ -10,19 +10,28 @@ import { Markup, Telegraf } from "telegraf";
 import { message } from "telegraf/filters";
 import type { Config } from "./config.js";
 import {
+  addContact,
   addMeetingNote,
+  addOutreach,
   addProject,
   addProjectTask,
   addDailyLog,
   getAllProjectsWithTasks,
+  getContactForProject,
+  getContacts,
+  getOpenOutreach,
+  getOutreach,
   getProjectWithTasks,
+  getUserById,
   getUserByTelegramChatId,
   linkTelegramByCode,
   unlinkTelegram,
   setStatus,
   stampProgress,
+  updateOutreach,
   updateProjectTask,
   type NewProject,
+  type OutreachWithContext,
   type ProjectStatus,
   type User,
   PROJECT_STATUSES,
@@ -36,7 +45,10 @@ import {
 } from "./messages.js";
 import { allocateDay, rankAllocatable } from "./scoring.js";
 import {
+  assessReply,
   chat,
+  draftOutreachEmail,
+  reviseOutreachEmail,
   isAiConfigured,
   processCheckin,
   suggestTasksFromMeetingNote,
@@ -44,6 +56,8 @@ import {
   type ChatMessage,
 } from "./ai.js";
 import { isTranscriptionConfigured, transcribeAudio } from "./transcribe.js";
+import { buildFallbackDraft, isEmailConfigured, sendEmail } from "./email.js";
+import type { ReplyEvent } from "./inbox.js";
 
 const SETTABLE_STATUSES: ProjectStatus[] = [...PROJECT_STATUSES];
 
@@ -70,7 +84,12 @@ interface CheckinSession {
   kind: "checkin";
 }
 
-type Session = AddDraft | DoneFollowUp | CheckinSession;
+interface OutreachEditSession {
+  kind: "outreach_edit";
+  outreachId: number;
+}
+
+type Session = AddDraft | DoneFollowUp | CheckinSession | OutreachEditSession;
 
 /** Telegram messages are capped at 4096 chars; keep a margin for suffixes. */
 const TELEGRAM_MAX_REPLY = 4000;
@@ -88,6 +107,29 @@ export interface ConciergeBot {
   sendCheckinMessage: (user: User) => Promise<void>;
   sendWeeklyReview: (user: User) => Promise<void>;
   sendAlert: (user: User, text: string) => Promise<void>;
+  /** Notify the user that a client replied to an outreach email. */
+  notifyReply: (event: ReplyEvent) => Promise<void>;
+}
+
+function outreachReviewText(o: OutreachWithContext): string {
+  return [
+    `\u2709\uFE0F Draft to ${o.contact_name} <${o.contact_email}> — ${o.project_name} (#${o.project_id})`,
+    `Waiting on: ${o.waiting_on}`,
+    "",
+    `Subject: ${o.subject}`,
+    "",
+    o.body,
+  ].join("\n");
+}
+
+function outreachKeyboard(outreachId: number) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback("\uD83D\uDCE4 Send", `outreach_send:${outreachId}`)],
+    [
+      Markup.button.callback("\u270F\uFE0F Edit", `outreach_edit:${outreachId}`),
+      Markup.button.callback("\uD83D\uDDD1 Discard", `outreach_discard:${outreachId}`),
+    ],
+  ]);
 }
 
 function describeAction(a: ChatAction): string {
@@ -108,6 +150,10 @@ function describeAction(a: ChatAction): string {
       return `Remembered: "${a.title}"`;
     case "forgot_memory":
       return `Forgot memory #${a.id}`;
+    case "added_contact":
+      return `Saved contact "${a.name}"`;
+    case "drafted_email":
+      return `Drafted an email to ${a.name} — review below`;
   }
 }
 
@@ -150,6 +196,10 @@ export function createBot(config: Config): ConciergeBot {
       "/done {id} — complete the next open task",
       "/progress {id} [note] — log progress on a project",
       "/status {id} {status} — update project status",
+      "/contact {id} {name} {email} — save a client contact for a project",
+      "/contacts — list saved contacts",
+      "/draft {id} {what you're waiting on} — draft a chase-up email to the client",
+      "/outreach — open drafts and emails awaiting a reply",
       "/unlink — disconnect this Telegram from your account",
     ];
     if (isAiConfigured(config)) {
@@ -236,6 +286,119 @@ export function createBot(config: Config): ConciergeBot {
     await ctx.reply("Assistant conversation cleared — we start fresh.");
   });
 
+  bot.command("contact", async (ctx) => {
+    const user = await requireLinkedUser(ctx);
+    if (!user) return;
+    const rest = stripCommand(ctx.message.text);
+    const { id, remainder } = splitIdAndRest(rest);
+    // Last token must be the email; everything between is the name.
+    const parts = remainder.trim().split(/\s+/);
+    const email = parts.length >= 2 ? parts[parts.length - 1]! : "";
+    const name = parts.slice(0, -1).join(" ");
+    if (id === null || !name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      await ctx.reply("Usage: /contact {project id} {name} {email}\ne.g. /contact 3 Joe Rossi joe@pizza.com");
+      return;
+    }
+    const project = await getProjectWithTasks(user.id, id);
+    if (!project) {
+      await ctx.reply(`No project with id ${id}.`);
+      return;
+    }
+    const contact = await addContact(user.id, { name, email, project_id: id });
+    await ctx.reply(
+      `\u2705 Saved ${contact.name} <${contact.email}> as the contact for "${project.name}".\n` +
+        `When something's stuck, try: /draft ${id} what you're waiting on`
+    );
+  });
+
+  bot.command("contacts", async (ctx) => {
+    const user = await requireLinkedUser(ctx);
+    if (!user) return;
+    const contacts = await getContacts(user.id);
+    if (contacts.length === 0) {
+      await ctx.reply("No contacts yet. Add one with /contact {project id} {name} {email}.");
+      return;
+    }
+    await ctx.reply(
+      contacts
+        .map((c) => {
+          const project = c.project_id ? ` — project #${c.project_id}` : "";
+          return `#${c.id} ${c.name} <${c.email}>${project}`;
+        })
+        .join("\n")
+    );
+  });
+
+  bot.command("draft", async (ctx) => {
+    const user = await requireLinkedUser(ctx);
+    if (!user) return;
+    const rest = stripCommand(ctx.message.text);
+    const { id, remainder } = splitIdAndRest(rest);
+    const waitingOn = remainder.trim();
+    if (id === null || !waitingOn) {
+      await ctx.reply(
+        "Usage: /draft {project id} {what you're waiting on}\ne.g. /draft 3 photos of the finished kitchen"
+      );
+      return;
+    }
+    const project = await getProjectWithTasks(user.id, id);
+    if (!project) {
+      await ctx.reply(`No project with id ${id}.`);
+      return;
+    }
+    const contact = await getContactForProject(user.id, id);
+    if (!contact) {
+      await ctx.reply(
+        `No contact linked to "${project.name}" yet.\nAdd one first: /contact ${id} {name} {email}`
+      );
+      return;
+    }
+
+    await ctx.sendChatAction("typing");
+    let draft: { subject: string; body: string };
+    if (isAiConfigured(config)) {
+      try {
+        draft = await draftOutreachEmail(config, user.id, id, contact.name, waitingOn);
+      } catch (err) {
+        console.error("[bot] AI draft failed, using template:", err);
+        draft = buildFallbackDraft(user, project, contact, waitingOn);
+      }
+    } else {
+      draft = buildFallbackDraft(user, project, contact, waitingOn);
+    }
+
+    const outreach = await addOutreach(user.id, {
+      project_id: id,
+      contact_id: contact.id,
+      waiting_on: waitingOn,
+      subject: draft.subject,
+      body: draft.body,
+    });
+    const full = (await getOutreach(user.id, outreach.id))!;
+    await ctx.reply(outreachReviewText(full).slice(0, TELEGRAM_MAX_REPLY), outreachKeyboard(outreach.id));
+  });
+
+  bot.command("outreach", async (ctx) => {
+    const user = await requireLinkedUser(ctx);
+    if (!user) return;
+    const open = await getOpenOutreach(user.id);
+    if (open.length === 0) {
+      await ctx.reply("No open outreach. Draft one with /draft {project id} {what you're waiting on}.");
+      return;
+    }
+    await ctx.reply(
+      open
+        .map((o) => {
+          const status =
+            o.status === "draft"
+              ? "draft — not sent"
+              : `sent ${o.sent_at ? new Date(o.sent_at).toISOString().slice(0, 10) : ""}, awaiting reply`;
+          return `#${o.id} to ${o.contact_name} (${o.project_name}): "${o.waiting_on}" — ${status}`;
+        })
+        .join("\n")
+    );
+  });
+
   bot.command("list", async (ctx) => {
     const user = await requireLinkedUser(ctx);
     if (!user) return;
@@ -275,7 +438,14 @@ export function createBot(config: Config): ConciergeBot {
       return;
     }
     await setStatus(user.id, id, status);
-    await ctx.reply(`\u2705 #${id} is now "${status}".`);
+    let hint = "";
+    if (status === "blocked") {
+      const contact = await getContactForProject(user.id, id);
+      hint = contact
+        ? `\n\nWaiting on ${contact.name}? /draft ${id} {what you need} and I'll write the email.`
+        : `\n\nWaiting on someone? Add their contact (/contact ${id} {name} {email}) and I can draft chase-up emails.`;
+    }
+    await ctx.reply(`\u2705 #${id} is now "${status}".${hint}`);
   });
 
   bot.command("done", async (ctx) => {
@@ -407,6 +577,91 @@ export function createBot(config: Config): ConciergeBot {
     );
   });
 
+  // Outreach review buttons.
+  bot.action(/^outreach_send:(\d+)$/, async (ctx) => {
+    const chatId = ctx.chat?.id?.toString();
+    if (!chatId) return ctx.answerCbQuery();
+    const user = await getUserByTelegramChatId(chatId);
+    if (!user) return ctx.answerCbQuery();
+
+    const outreach = await getOutreach(user.id, Number(ctx.match[1]));
+    if (!outreach || outreach.status === "cancelled") {
+      await ctx.answerCbQuery("This draft no longer exists.");
+      return;
+    }
+    if (outreach.status !== "draft") {
+      await ctx.answerCbQuery("Already sent.");
+      return;
+    }
+    if (!isEmailConfigured(config)) {
+      await ctx.answerCbQuery();
+      await ctx.reply(
+        "Email sending isn't configured — set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and SMTP_FROM on the server.\n\n" +
+          "Meanwhile you can copy the draft above and send it yourself."
+      );
+      return;
+    }
+
+    await ctx.answerCbQuery("Sending…");
+    try {
+      const { messageId } = await sendEmail(
+        config,
+        outreach.contact_email,
+        outreach.subject,
+        outreach.body
+      );
+      await updateOutreach(user.id, outreach.id, {
+        status: "sent",
+        smtp_message_id: messageId,
+        sent_at: new Date().toISOString(),
+      });
+      await stampProgress(user.id, outreach.project_id);
+      await ctx.reply(
+        `\uD83D\uDCE4 Sent to ${outreach.contact_name} <${outreach.contact_email}>.` +
+          (config.imapHost
+            ? " I'll let you know when they reply."
+            : " (Reply detection needs IMAP_HOST/IMAP_USER/IMAP_PASS to be set.)")
+      );
+    } catch (err) {
+      console.error("[bot] outreach send failed:", err);
+      await ctx.reply("Sending failed — check the SMTP settings and try again.");
+    }
+  });
+
+  bot.action(/^outreach_edit:(\d+)$/, async (ctx) => {
+    const chatId = ctx.chat?.id?.toString();
+    if (!chatId) return ctx.answerCbQuery();
+    const user = await getUserByTelegramChatId(chatId);
+    if (!user) return ctx.answerCbQuery();
+    const outreach = await getOutreach(user.id, Number(ctx.match[1]));
+    if (!outreach || outreach.status !== "draft") {
+      await ctx.answerCbQuery("This draft can't be edited.");
+      return;
+    }
+    await ctx.answerCbQuery();
+    sessions.set(chatId, { kind: "outreach_edit", outreachId: outreach.id });
+    await ctx.reply(
+      isAiConfigured(config)
+        ? "Tell me how to change it (e.g. \u201cshorter and more casual\u201d, \u201cmention the Friday deadline\u201d), or paste a full replacement. /cancel keeps it as is."
+        : "Reply with the replacement email text (first line = subject). /cancel keeps it as is."
+    );
+  });
+
+  bot.action(/^outreach_discard:(\d+)$/, async (ctx) => {
+    const chatId = ctx.chat?.id?.toString();
+    if (!chatId) return ctx.answerCbQuery();
+    const user = await getUserByTelegramChatId(chatId);
+    if (!user) return ctx.answerCbQuery();
+    const outreach = await getOutreach(user.id, Number(ctx.match[1]));
+    if (!outreach || outreach.status !== "draft") {
+      await ctx.answerCbQuery("This draft can't be discarded.");
+      return;
+    }
+    await updateOutreach(user.id, outreach.id, { status: "cancelled" });
+    await ctx.answerCbQuery("Discarded.");
+    await ctx.reply("\uD83D\uDDD1 Draft discarded.");
+  });
+
   // Voice notes → transcribe → meeting note → suggested follow-up tasks.
   bot.on(message("voice"), async (ctx) => {
     const user = await requireLinkedUser(ctx);
@@ -514,6 +769,44 @@ export function createBot(config: Config): ConciergeBot {
       return;
     }
 
+    if (session?.kind === "outreach_edit") {
+      sessions.delete(chatId);
+      const outreach = await getOutreach(user.id, session.outreachId);
+      if (!outreach || outreach.status !== "draft") {
+        await ctx.reply("That draft is gone — nothing to edit.");
+        return;
+      }
+      await ctx.sendChatAction("typing");
+      let revised: { subject: string; body: string };
+      if (isAiConfigured(config)) {
+        try {
+          revised = await reviseOutreachEmail(
+            config,
+            { subject: outreach.subject, body: outreach.body },
+            text.trim()
+          );
+        } catch (err) {
+          console.error("[bot] outreach revision failed:", err);
+          await ctx.reply("Couldn't revise the draft — try again, or paste replacement text.");
+          sessions.set(chatId, { kind: "outreach_edit", outreachId: session.outreachId });
+          return;
+        }
+      } else {
+        // Literal replacement: first line becomes the subject when multi-line.
+        const [first = "", ...restLines] = text.trim().split("\n");
+        revised = restLines.length
+          ? { subject: first.trim(), body: restLines.join("\n").trim() }
+          : { subject: outreach.subject, body: text.trim() };
+      }
+      await updateOutreach(user.id, outreach.id, revised);
+      const updated = (await getOutreach(user.id, outreach.id))!;
+      await ctx.reply(
+        outreachReviewText(updated).slice(0, TELEGRAM_MAX_REPLY),
+        outreachKeyboard(outreach.id)
+      );
+      return;
+    }
+
     // No session: conversational assistant.
     if (!isAiConfigured(config)) {
       await ctx.reply(
@@ -533,6 +826,18 @@ export function createBot(config: Config): ConciergeBot {
       const summary = result.actions.map((a) => `\u2705 ${describeAction(a)}`).join("\n");
       const reply = summary ? `${result.reply}\n\n${summary}` : result.reply;
       await ctx.reply(reply.slice(0, TELEGRAM_MAX_REPLY));
+
+      // Any email the assistant drafted gets its own review message with buttons.
+      for (const action of result.actions) {
+        if (action.type !== "drafted_email") continue;
+        const outreach = await getOutreach(user.id, action.id);
+        if (outreach && outreach.status === "draft") {
+          await ctx.reply(
+            outreachReviewText(outreach).slice(0, TELEGRAM_MAX_REPLY),
+            outreachKeyboard(outreach.id)
+          );
+        }
+      }
     } catch (err) {
       history.pop();
       console.error("[bot] assistant chat failed:", err);
@@ -584,7 +889,37 @@ export function createBot(config: Config): ConciergeBot {
     await bot.telegram.sendMessage(user.telegram_chat_id, text);
   };
 
-  return { bot, sendDailyMessage, sendCheckinMessage, sendWeeklyReview, sendAlert };
+  const notifyReply = async ({ outreach, replyText }: ReplyEvent): Promise<void> => {
+    const user = await getUserById(outreach.user_id);
+    if (!user?.telegram_chat_id) return;
+
+    const lines = [
+      `\uD83D\uDCEC ${outreach.contact_name} replied about "${outreach.waiting_on}" (${outreach.project_name} #${outreach.project_id}).`,
+    ];
+
+    const snippet = replyText.trim();
+    if (snippet) {
+      const short = snippet.length > 400 ? `${snippet.slice(0, 400)}…` : snippet;
+      lines.push("", `\u00AB${short}\u00BB`);
+    }
+
+    if (isAiConfigured(config) && snippet) {
+      try {
+        const verdict = await assessReply(config, outreach.waiting_on, snippet);
+        if (verdict) lines.push("", `\uD83E\uDD16 ${verdict}`);
+      } catch (err) {
+        console.error("[bot] reply assessment failed:", err);
+      }
+    }
+
+    lines.push("", `If you're unblocked: /status ${outreach.project_id} active`);
+    await bot.telegram.sendMessage(
+      user.telegram_chat_id,
+      lines.join("\n").slice(0, TELEGRAM_MAX_REPLY)
+    );
+  };
+
+  return { bot, sendDailyMessage, sendCheckinMessage, sendWeeklyReview, sendAlert, notifyReply };
 }
 
 /**

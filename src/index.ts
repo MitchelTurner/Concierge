@@ -13,6 +13,7 @@
 import { loadConfig } from "./config.js";
 import { initDb, closeDb, deleteExpiredSessions } from "./db.js";
 import { createBot } from "./bot.js";
+import { startInboxWatcher } from "./inbox.js";
 import { startUserScheduler } from "./scheduler.js";
 import { startServer } from "./server.js";
 
@@ -32,7 +33,7 @@ async function main(): Promise<void> {
     60 * 60 * 1000
   );
 
-  const { bot, sendDailyMessage, sendCheckinMessage, sendWeeklyReview, sendAlert } =
+  const { bot, sendDailyMessage, sendCheckinMessage, sendWeeklyReview, sendAlert, notifyReply } =
     createBot(config);
 
   startUserScheduler({
@@ -41,6 +42,8 @@ async function main(): Promise<void> {
     sendWeekly: sendWeeklyReview,
     sendAlert,
   });
+
+  startInboxWatcher(config, notifyReply);
 
   startServer(config);
 
