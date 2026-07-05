@@ -47,6 +47,10 @@ export interface Config {
   anthropicApiKey: string;
   /** Anthropic model id for the chat agent. */
   anthropicModel: string;
+  /** OpenAI API key for voice-note transcription. Empty = voice notes disabled. */
+  openaiApiKey: string;
+  /** OpenAI transcription model id. */
+  openaiTranscribeModel: string;
   /** HTTP port for the web dashboard (Railway sets PORT). */
   port: number;
   /** Default timezone for new accounts (users can override in settings). */
@@ -101,6 +105,8 @@ export function loadConfig(): Config {
   const defaultTz = (process.env.TZ ?? "America/Chicago").trim();
   const anthropicApiKey = (process.env.ANTHROPIC_API_KEY ?? "").trim();
   const anthropicModel = (process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6").trim();
+  const openaiApiKey = (process.env.OPENAI_API_KEY ?? "").trim();
+  const openaiTranscribeModel = (process.env.OPENAI_TRANSCRIBE_MODEL ?? "whisper-1").trim();
 
   const portRaw = (process.env.PORT ?? "3000").trim();
   const port = Number(portRaw);
@@ -115,6 +121,8 @@ export function loadConfig(): Config {
     telegramBotToken,
     anthropicApiKey,
     anthropicModel,
+    openaiApiKey,
+    openaiTranscribeModel,
     port,
     defaultTz,
     defaultDailyTime,
