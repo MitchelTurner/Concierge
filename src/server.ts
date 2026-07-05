@@ -23,6 +23,8 @@ import {
   addProject,
   addProjectTask,
   addProjectTasks,
+  addContact,
+  deleteContact,
   deleteGoal,
   deleteMeetingNote,
   deleteMemory,
@@ -31,17 +33,20 @@ import {
   generateLinkCode,
   getAllProjectsWithTasks,
   getDailyLog,
+  getContacts,
   getGoal,
   getGoals,
   getMeetingNote,
   getMeetingNotes,
   getMemories,
+  getOpenOutreach,
   getProject,
   getProjectTask,
   getProjectWithTasks,
   getUserById,
   setTelegramLinkCode,
   unlinkTelegram,
+  updateContact,
   updateGoal,
   updateMeetingNote,
   updateProject,
@@ -668,6 +673,86 @@ export function createServer(config: Config): express.Express {
       return res.status(404).json({ error: "Not found" });
     }
     res.json({ ok: true });
+  });
+
+  // --- Contacts ---
+
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  api.get("/contacts", async (req, res) => {
+    res.json(await getContacts(req.userId!));
+  });
+
+  api.post("/contacts", async (req, res) => {
+    const body = req.body ?? {};
+    const name = toNullableString(body.name);
+    const email = toNullableString(body.email);
+    if (!name) return res.status(400).json({ error: "name is required" });
+    if (!email || !EMAIL_RE.test(email)) {
+      return res.status(400).json({ error: "a valid email is required" });
+    }
+    const projectId = body.project_id === null || body.project_id === undefined || body.project_id === ""
+      ? null
+      : toInt(body.project_id);
+    if (projectId !== null && !(await getProject(req.userId!, projectId))) {
+      return res.status(400).json({ error: `no project #${projectId}` });
+    }
+    res.status(201).json(
+      await addContact(req.userId!, {
+        name,
+        email,
+        project_id: projectId,
+        role: toNullableString(body.role),
+        notes: toNullableString(body.notes),
+      })
+    );
+  });
+
+  api.patch("/contacts/:id", async (req, res) => {
+    const id = parseId(req);
+    if (id === null) return res.status(404).json({ error: "Not found" });
+    const body = req.body ?? {};
+    const patch: Parameters<typeof updateContact>[2] = {};
+
+    if ("name" in body) {
+      const name = toNullableString(body.name);
+      if (!name) return res.status(400).json({ error: "name cannot be empty" });
+      patch.name = name;
+    }
+    if ("email" in body) {
+      const email = toNullableString(body.email);
+      if (!email || !EMAIL_RE.test(email)) {
+        return res.status(400).json({ error: "a valid email is required" });
+      }
+      patch.email = email;
+    }
+    if ("project_id" in body) {
+      const projectId = body.project_id === null || body.project_id === "" ? null : toInt(body.project_id);
+      if (projectId !== null && !(await getProject(req.userId!, projectId))) {
+        return res.status(400).json({ error: `no project #${projectId}` });
+      }
+      patch.project_id = projectId;
+    }
+    if ("role" in body) patch.role = toNullableString(body.role);
+    if ("notes" in body) patch.notes = toNullableString(body.notes);
+
+    const updated = await updateContact(req.userId!, id, patch);
+    if (!updated) return res.status(404).json({ error: "Not found" });
+    res.json(updated);
+  });
+
+  api.delete("/contacts/:id", async (req, res) => {
+    const id = parseId(req);
+    if (id === null || !(await deleteContact(req.userId!, id))) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    res.json({ ok: true });
+  });
+
+  // --- Outreach (read-only here; drafting/sending happens in Telegram) ---
+
+  api.get("/outreach", async (req, res) => {
+    res.json(await getOpenOutreach(req.userId!));
   });
 
   // --- Assistant memory ---

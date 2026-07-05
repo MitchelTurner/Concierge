@@ -1575,6 +1575,21 @@
               <div class="section-block">
                 <div class="section-head">
                   <h2>
+                    Contacts
+                    <span id="contacts-count" class="count">0</span>
+                  </h2>
+                  <button onclick="addContactCard()">
+                    <svg><use href="#icon-plus"/></svg>
+                    Add contact
+                  </button>
+                </div>
+                <p class="muted" style="font-size:13px;margin:-4px 0 12px">Client contacts per project — used for chase-up emails when something's stuck (draft with /draft in Telegram or ask the assistant).</p>
+                <div id="contacts"></div>
+              </div>
+
+              <div class="section-block">
+                <div class="section-head">
+                  <h2>
                     Ideas
                     <span id="projects-count" class="count">0</span>
                   </h2>
@@ -2613,6 +2628,80 @@
 
       function removeNewCard2(btn) { btn.closest(".goal").remove(); }
 
+      function contactCard(c) {
+        const isNew = !c.id;
+        const projectOpts = cachedProjects
+          .map((p) => `<option value="${p.id}" ${p.id === c.project_id ? "selected" : ""}>${esc(p.name)}</option>`)
+          .join("");
+        return `
+        <div class="goal" data-id="${c.id || ""}">
+          <div class="row">
+            <div class="field"><label>Name${c.id ? " #" + c.id : ""}</label><input data-k="name" value="${esc(c.name)}" placeholder="Client name" /></div>
+            <div class="field"><label>Email</label><input data-k="email" value="${esc(c.email)}" placeholder="client@example.com" /></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Project</label><select data-k="project_id"><option value="">— None —</option>${projectOpts}</select></div>
+            <div class="field"><label>Role</label><input data-k="role" value="${esc(c.role)}" placeholder="e.g. owner, Joe's Pizza" /></div>
+          </div>
+          <div class="card-actions">
+            <button class="primary" onclick="saveContact(this)">${isNew ? "Create" : "Save"}</button>
+            <span class="spacer"></span>
+            <button class="danger" onclick="${isNew ? "removeNewContact(this)" : "deleteContactCard(this)"}">${isNew ? "Discard" : "Delete"}</button>
+          </div>
+        </div>`;
+      }
+
+      function removeNewContact(btn) { btn.closest(".goal").remove(); }
+
+      async function loadContacts() {
+        const list = await api("GET", "/contacts");
+        $("contacts-count").textContent = list.length;
+        if (list.length === 0) {
+          $("contacts").innerHTML = '<div class="empty-state">No contacts yet — add the client behind each project.</div>';
+        } else {
+          $("contacts").innerHTML = list.map(contactCard).join("");
+        }
+      }
+
+      function addContactCard() {
+        const empty = $("contacts").querySelector(".empty-state");
+        if (empty) empty.remove();
+        const wrap = document.createElement("div");
+        wrap.innerHTML = contactCard({});
+        $("contacts").prepend(wrap.firstElementChild);
+      }
+
+      async function saveContact(btn) {
+        const el = btn.closest(".goal");
+        const id = el.dataset.id;
+        const body = {
+          name: el.querySelector('[data-k="name"]').value,
+          email: el.querySelector('[data-k="email"]').value,
+          project_id: el.querySelector('[data-k="project_id"]').value || null,
+          role: el.querySelector('[data-k="role"]').value || null,
+        };
+        try {
+          if (id) await api("PATCH", "/contacts/" + id, body);
+          else await api("POST", "/contacts", body);
+          toast("Saved");
+          await loadContacts();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      }
+
+      async function deleteContactCard(btn) {
+        const el = btn.closest(".goal");
+        if (!confirm("Delete this contact?")) return;
+        try {
+          await api("DELETE", "/contacts/" + el.dataset.id);
+          toast("Deleted");
+          await loadContacts();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      }
+
       async function loadGoals() {
         const list = await api("GET", "/goals");
         $("goals-count").textContent = list.length;
@@ -2662,7 +2751,9 @@
         $("app").classList.remove("hidden");
         updateSidebarUser(currentUser);
         token = "";
-        Promise.all([loadGoals(), loadProjects(), loadMeetingNotes(), loadDailyLog(), loadSettings()]).catch((e) => toast(e.message, true));
+        Promise.all([loadGoals(), loadProjects(), loadMeetingNotes(), loadDailyLog(), loadSettings()])
+          .then(() => loadContacts()) // after projects so the project dropdown is populated
+          .catch((e) => toast(e.message, true));
       }
 
       function showLogin() {
@@ -2923,6 +3014,8 @@
           if (a.type === "logged_progress") return `Logged progress on ${a.name}`;
           if (a.type === "saved_memory") return `Remembered: ${a.title}`;
           if (a.type === "forgot_memory") return `Forgot memory #${a.id}`;
+          if (a.type === "added_contact") return `Saved contact: ${a.name}`;
+          if (a.type === "drafted_email") return `Drafted an email to ${a.name} — review and send it from Telegram`;
           return "";
         }).filter(Boolean).join("\n");
       }
