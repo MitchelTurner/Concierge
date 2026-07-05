@@ -13,12 +13,18 @@ import {
   releaseUserNudgeClaim,
   type User,
 } from "./db.js";
+import { runProactiveAlerts } from "./alerts.js";
 
 export interface UserNudgeCallbacks {
   sendDaily: (user: User) => Promise<void>;
   sendCheckin: (user: User) => Promise<void>;
   sendWeekly: (user: User) => Promise<void>;
+  sendAlert: (user: User, text: string) => Promise<void>;
 }
+
+/** Proactive alerts only fire during waking hours (local time). */
+const ALERT_HOUR_MIN = 9;
+const ALERT_HOUR_MAX = 20;
 
 const WEEKDAY_INDEX: Record<string, number> = {
   Sun: 0,
@@ -112,6 +118,18 @@ async function runUserNudges(callbacks: UserNudgeCallbacks): Promise<void> {
       } catch (err) {
         await releaseUserNudgeClaim(user.id, "checkin", date);
         console.error(`[scheduler] check-in failed for user #${user.id}:`, err);
+      }
+    }
+
+    // Proactive alerts: checked once an hour (minute :00) during waking hours.
+    // Dedupe lives inside runProactiveAlerts (one-shot app_meta claims).
+    const [hourStr, minuteStr] = time.split(":");
+    const hour = Number(hourStr);
+    if (minuteStr === "00" && hour >= ALERT_HOUR_MIN && hour <= ALERT_HOUR_MAX) {
+      try {
+        await runProactiveAlerts(user, callbacks.sendAlert);
+      } catch (err) {
+        console.error(`[scheduler] proactive alerts failed for user #${user.id}:`, err);
       }
     }
 
