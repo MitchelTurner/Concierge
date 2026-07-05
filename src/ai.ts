@@ -6,11 +6,14 @@ import type { Config } from "./config.js";
 import {
   addDailyLog,
   addGoal,
+  addMemory,
   addProject,
   addProjectTask,
+  deleteMemory,
   getAllProjectsWithTasks,
   getGoals,
   getMeetingNotes,
+  getMemories,
   getProjectTask,
   getProjectWithTasks,
   getStalledProjects,
@@ -25,6 +28,7 @@ import {
   type ProjectType,
   type ProjectStatus,
 } from "./db.js";
+import { formatEventLines, getTodaysEvents } from "./calendar.js";
 import { allocateDay, scoreProject } from "./scoring.js";
 
 export interface ChatMessage {
@@ -39,7 +43,9 @@ export interface ChatAction {
     | "created_goal"
     | "added_tasks"
     | "completed_task"
-    | "logged_progress";
+    | "logged_progress"
+    | "saved_memory"
+    | "forgot_memory";
   id: number;
   name?: string;
   title?: string;
@@ -154,6 +160,29 @@ const TOOLS: Anthropic.Tool[] = [
         note: { type: "string", description: "Short progress note in the user's words" },
       },
       required: ["project_id"],
+    },
+  },
+  {
+    name: "save_memory",
+    description:
+      "Remember a durable fact, preference, or constraint about the user (e.g. working hours, a client quirk, a standing rule). Keep it to one short sentence. Do not save transient status.",
+    input_schema: {
+      type: "object",
+      properties: {
+        content: { type: "string", description: "One short sentence to remember" },
+      },
+      required: ["content"],
+    },
+  },
+  {
+    name: "forget_memory",
+    description: "Delete a saved memory by its id (shown in the memory list) when it is wrong or outdated.",
+    input_schema: {
+      type: "object",
+      properties: {
+        memory_id: { type: "integer" },
+      },
+      required: ["memory_id"],
     },
   },
 ];
@@ -385,6 +414,29 @@ async function runTool(userId: number, name: string, input: unknown): Promise<To
     };
   }
 
+  if (name === "save_memory") {
+    const content = toNullableString(body.content);
+    if (!content) return { output: { ok: false, error: "content is required" }, actions: [] };
+    const memory = await addMemory(userId, content);
+    return {
+      output: { ok: true, memory: { id: memory.id, content: memory.content } },
+      actions: [{ type: "saved_memory", id: memory.id, title: memory.content }],
+    };
+  }
+
+  if (name === "forget_memory") {
+    const memoryId = toInt(body.memory_id ?? body.id);
+    if (memoryId === null) {
+      return { output: { ok: false, error: "memory_id must be an integer" }, actions: [] };
+    }
+    const deleted = await deleteMemory(userId, memoryId);
+    if (!deleted) return { output: { ok: false, error: `no memory #${memoryId}` }, actions: [] };
+    return {
+      output: { ok: true, deleted: memoryId },
+      actions: [{ type: "forgot_memory", id: memoryId }],
+    };
+  }
+
   return { output: { ok: false, error: `unknown tool: ${name}` }, actions: [] };
 }
 
@@ -417,8 +469,21 @@ export async function buildSystemPrompt(userId: number): Promise<string> {
     "- create_goal: add a north-star goal",
     "- complete_task: mark a task done by its task id when the user says they finished it",
     "- log_progress: stamp progress on an idea (and optionally save a note) when the user reports working on it",
+    "- save_memory: remember a durable preference/fact the user shares (working hours, client quirks, standing rules)",
+    "- forget_memory: remove a saved memory that is wrong or outdated",
     ""
   );
+
+  const memories = await getMemories(userId);
+  lines.push("# Memory (durable facts and preferences about the user)");
+  if (memories.length === 0) {
+    lines.push("(nothing saved yet — use save_memory when the user shares something worth keeping)");
+  } else {
+    for (const m of memories.slice(0, 30)) {
+      lines.push(`- [memory ${m.id}] ${m.content}`);
+    }
+  }
+  lines.push("");
 
   lines.push("# Goals");
   if (goals.length === 0) {
@@ -471,6 +536,21 @@ export async function buildSystemPrompt(userId: number): Promise<string> {
   }
   if (stalled.length > 0) {
     lines.push(`- Stalling (${stallDays}+ days): ${stalled.map((p) => p.name).join("; ")}`);
+  }
+
+  if (user?.calendar_ics_url) {
+    lines.push("");
+    lines.push("# Today's calendar");
+    try {
+      const events = await getTodaysEvents(user.calendar_ics_url, user.timezone);
+      if (events.length === 0) {
+        lines.push("(no events today)");
+      } else {
+        lines.push(...formatEventLines(events, user.timezone));
+      }
+    } catch {
+      lines.push("(calendar feed unavailable right now)");
+    }
   }
 
   const notes = await getMeetingNotes(userId);
