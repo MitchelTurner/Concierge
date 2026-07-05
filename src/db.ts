@@ -44,9 +44,20 @@ export interface User {
   /** 0 = Sunday … 6 = Saturday. */
   weekly_review_day: number;
   weekly_review_time: string;
+  /** Optional read-only ICS feed for calendar awareness. */
+  calendar_ics_url: string | null;
   last_daily_nudge_date: string | null;
   last_checkin_nudge_date: string | null;
   last_weekly_review_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A durable fact or preference the assistant saved about the user. */
+export interface UserMemory {
+  id: number;
+  user_id: number;
+  content: string;
   created_at: string;
   updated_at: string;
 }
@@ -191,6 +202,7 @@ export interface UserSettingsPatch {
   stall_days?: number;
   weekly_review_day?: number;
   weekly_review_time?: string;
+  calendar_ics_url?: string | null;
 }
 
 let pool: pg.Pool | null = null;
@@ -232,6 +244,17 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_review_day INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_review_time TEXT NOT NULL DEFAULT '17:00';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_weekly_review_date DATE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS calendar_ics_url TEXT;
+
+CREATE TABLE IF NOT EXISTS user_memory (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_memory_user_id ON user_memory(user_id);
 
 CREATE TABLE IF NOT EXISTS sessions (
   id SERIAL PRIMARY KEY,
@@ -325,6 +348,10 @@ function getPool(): pg.Pool {
   if (!pool) throw new Error("Database not initialized — call initDb() first.");
   return pool;
 }
+
+// Return DATE columns as "YYYY-MM-DD" strings instead of JS Date objects so
+// date math (daysUntil, nudge dedupe comparisons) works on the documented type.
+pg.types.setTypeParser(pg.types.builtins.DATE, (v) => v);
 
 export async function initDb(): Promise<void> {
   if (pool) return;
@@ -449,6 +476,10 @@ export async function updateUserSettings(
   if (patch.weekly_review_time !== undefined) {
     sets.push(`weekly_review_time = $${i++}`);
     params.push(patch.weekly_review_time);
+  }
+  if (patch.calendar_ics_url !== undefined) {
+    sets.push(`calendar_ics_url = $${i++}`);
+    params.push(patch.calendar_ics_url);
   }
 
   if (sets.length === 0) return getUserById(userId);
@@ -577,6 +608,24 @@ export async function releaseUserNudgeClaim(
   date: string
 ): Promise<void> {
   await getPool().query("DELETE FROM app_meta WHERE key = $1", [nudgeClaimKey(kind, userId, date)]);
+}
+
+// --- One-shot claims for proactive alerts ---
+
+/** Claim an arbitrary app_meta key exactly once. Returns false if already claimed. */
+export async function claimOnce(key: string): Promise<boolean> {
+  const result = await getPool().query<{ key: string }>(
+    `INSERT INTO app_meta (key, value)
+     VALUES ($1, $2)
+     ON CONFLICT DO NOTHING
+     RETURNING key`,
+    [key, nowIso()]
+  );
+  return result.rows.length > 0;
+}
+
+export async function releaseClaim(key: string): Promise<void> {
+  await getPool().query("DELETE FROM app_meta WHERE key = $1", [key]);
 }
 
 // --- Sessions ---
@@ -1017,6 +1066,32 @@ export async function updateGoal(
 export async function deleteGoal(userId: number, id: number): Promise<boolean> {
   const result = await getPool().query(
     "DELETE FROM goals WHERE user_id = $1 AND id = $2",
+    [userId, id]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+// --- Assistant memory ---
+
+export async function getMemories(userId: number): Promise<UserMemory[]> {
+  const result = await getPool().query<UserMemory>(
+    "SELECT * FROM user_memory WHERE user_id = $1 ORDER BY id",
+    [userId]
+  );
+  return result.rows;
+}
+
+export async function addMemory(userId: number, content: string): Promise<UserMemory> {
+  const result = await getPool().query<UserMemory>(
+    "INSERT INTO user_memory (user_id, content) VALUES ($1, $2) RETURNING *",
+    [userId, content.trim()]
+  );
+  return result.rows[0];
+}
+
+export async function deleteMemory(userId: number, id: number): Promise<boolean> {
+  const result = await getPool().query(
+    "DELETE FROM user_memory WHERE user_id = $1 AND id = $2",
     [userId, id]
   );
   return (result.rowCount ?? 0) > 0;
