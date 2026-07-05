@@ -33,6 +33,7 @@ export interface PublicUser {
   stall_days: number;
   weekly_review_day: number;
   weekly_review_time: string;
+  calendar_ics_url: string | null;
 }
 
 export function toPublicUser(user: User): PublicUser {
@@ -47,6 +48,7 @@ export function toPublicUser(user: User): PublicUser {
     stall_days: user.stall_days,
     weekly_review_day: user.weekly_review_day,
     weekly_review_time: user.weekly_review_time,
+    calendar_ics_url: user.calendar_ics_url,
   };
 }
 

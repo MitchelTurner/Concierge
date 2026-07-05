@@ -1696,6 +1696,11 @@
                       </div>
                       <div class="field"><label>Weekly review time</label><input id="settings-weekly-time" type="time" /></div>
                     </div>
+                    <div class="field">
+                      <label>Calendar feed (ICS URL)</label>
+                      <input id="settings-ics" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" />
+                    </div>
+                    <p class="muted" style="font-size:12px;margin:-4px 0 10px">Optional. When set, your morning nudge and the AI assistant see today's events.</p>
                     <div class="card-actions" style="margin-top:4px;border-top:none;padding-top:0">
                       <button class="primary" onclick="saveSettings()">Save schedule</button>
                     </div>
@@ -1713,6 +1718,13 @@
                       <button id="btn-telegram-link" class="primary" onclick="generateTelegramLink()">Generate link code</button>
                       <button id="btn-telegram-unlink" class="danger hidden" onclick="unlinkTelegram()">Unlink Telegram</button>
                     </div>
+                  </div>
+                </div>
+                <div class="section-block">
+                  <div class="section-head"><h2>Assistant memory</h2></div>
+                  <div class="card">
+                    <p class="muted" style="margin-bottom:12px">Facts and preferences the assistant saved about you — it uses them as context in every chat. Tell it "remember that …" to add one.</p>
+                    <div id="memory-list"></div>
                   </div>
                 </div>
               </div>
@@ -2712,12 +2724,46 @@
         $("settings-stall").value = user.stall_days || 4;
         $("settings-weekly-day").value = String(user.weekly_review_day ?? 0);
         $("settings-weekly-time").value = toTimeInput(user.weekly_review_time || "17:00");
+        $("settings-ics").value = user.calendar_ics_url || "";
+        loadMemories();
         $("telegram-status").textContent = user.telegram_linked
           ? "Telegram is linked — you'll get daily nudges and check-ins."
           : "Link Telegram to get daily focus messages and evening check-ins.";
         $("btn-telegram-unlink").classList.toggle("hidden", !user.telegram_linked);
         $("btn-telegram-link").classList.toggle("hidden", user.telegram_linked);
         $("telegram-link-box").classList.add("hidden");
+      }
+
+      async function loadMemories() {
+        const list = $("memory-list");
+        try {
+          const memories = await api("GET", "/memories");
+          if (!memories.length) {
+            list.innerHTML = '<p class="muted" style="margin:0">Nothing saved yet.</p>';
+            return;
+          }
+          list.innerHTML = memories
+            .map(
+              (m) => `
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+                <span style="flex:1;font-size:13px">${esc(m.content)}</span>
+                <button class="danger" onclick="forgetMemory(${m.id})">Forget</button>
+              </div>`
+            )
+            .join("");
+        } catch (e) {
+          list.innerHTML = '<p class="muted" style="margin:0">Could not load memories.</p>';
+        }
+      }
+
+      async function forgetMemory(id) {
+        try {
+          await api("DELETE", `/memories/${id}`);
+          toast("Memory removed");
+          loadMemories();
+        } catch (e) {
+          toast(e.message || "Failed to remove memory", true);
+        }
       }
 
       async function saveSettings() {
@@ -2730,6 +2776,7 @@
             stall_days: Number($("settings-stall").value),
             weekly_review_day: Number($("settings-weekly-day").value),
             weekly_review_time: fromTimeInput($("settings-weekly-time").value),
+            calendar_ics_url: $("settings-ics").value.trim() || null,
           });
           currentUser = user;
           updateSidebarUser(user);
@@ -2872,6 +2919,10 @@
           if (a.type === "updated_project") return `Updated idea #${a.id}: ${a.name}`;
           if (a.type === "created_goal") return `Added goal #${a.id}: ${a.title}`;
           if (a.type === "added_tasks") return `Added ${a.taskCount} task(s) to #${a.id} ${a.name}`;
+          if (a.type === "completed_task") return `Marked done: ${a.title}`;
+          if (a.type === "logged_progress") return `Logged progress on ${a.name}`;
+          if (a.type === "saved_memory") return `Remembered: ${a.title}`;
+          if (a.type === "forgot_memory") return `Forgot memory #${a.id}`;
           return "";
         }).filter(Boolean).join("\n");
       }

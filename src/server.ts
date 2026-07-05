@@ -25,6 +25,7 @@ import {
   addProjectTasks,
   deleteGoal,
   deleteMeetingNote,
+  deleteMemory,
   deleteProject,
   deleteProjectTask,
   generateLinkCode,
@@ -34,6 +35,7 @@ import {
   getGoals,
   getMeetingNote,
   getMeetingNotes,
+  getMemories,
   getProject,
   getProjectTask,
   getProjectWithTasks,
@@ -487,6 +489,13 @@ export function createServer(config: Config): express.Express {
       if (!TIME_RE.test(t)) return res.status(400).json({ error: "weekly_review_time must be HH:MM" });
       patch.weekly_review_time = t;
     }
+    if ("calendar_ics_url" in body) {
+      const url = toNullableString(body.calendar_ics_url);
+      if (url !== null && !/^https?:\/\//i.test(url)) {
+        return res.status(400).json({ error: "calendar_ics_url must be an http(s) URL or empty" });
+      }
+      patch.calendar_ics_url = url;
+    }
 
     const updated = await updateUserSettings(req.userId!, patch);
     if (!updated) return res.status(404).json({ error: "Not found" });
@@ -656,6 +665,20 @@ export function createServer(config: Config): express.Express {
   api.delete("/goals/:id", async (req, res) => {
     const id = parseId(req);
     if (id === null || !(await deleteGoal(req.userId!, id))) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    res.json({ ok: true });
+  });
+
+  // --- Assistant memory ---
+
+  api.get("/memories", async (req, res) => {
+    res.json(await getMemories(req.userId!));
+  });
+
+  api.delete("/memories/:id", async (req, res) => {
+    const id = parseId(req);
+    if (id === null || !(await deleteMemory(req.userId!, id))) {
       return res.status(404).json({ error: "Not found" });
     }
     res.json({ ok: true });
