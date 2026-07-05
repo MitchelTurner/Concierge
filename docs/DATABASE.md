@@ -44,6 +44,39 @@ DATABASE_SSL=false
 | `last_checkin_nudge_date` | DATE | prevents duplicate check-in sends |
 | `last_weekly_review_date` | DATE | prevents duplicate weekly review sends |
 
+### `contacts`
+
+Client contacts, optionally linked to a project. The project link tells
+`/draft` (and the `draft_client_email` AI tool) who to write to.
+
+| column | type | notes |
+| --- | --- | --- |
+| `id` | SERIAL | PK |
+| `user_id` | INTEGER | FK → users, cascade delete |
+| `project_id` | INTEGER | nullable FK → projects, set null on delete |
+| `name` | TEXT | |
+| `email` | TEXT | stored lowercase |
+| `role` | TEXT | nullable, e.g. "owner, Joe's Pizza" |
+| `notes` | TEXT | nullable |
+
+### `outreach`
+
+Chase-up emails to clients about pipeline blockers. Lifecycle:
+`draft` → `sent` → `replied` (or `cancelled`).
+
+| column | type | notes |
+| --- | --- | --- |
+| `id` | SERIAL | PK |
+| `user_id` | INTEGER | FK → users, cascade delete |
+| `project_id` | INTEGER | FK → projects, cascade delete |
+| `contact_id` | INTEGER | FK → contacts, cascade delete |
+| `waiting_on` | TEXT | what's blocking, e.g. "photos" |
+| `subject` / `body` | TEXT | the email |
+| `status` | TEXT | `draft` / `sent` / `replied` / `cancelled` |
+| `smtp_message_id` | TEXT | Message-ID of the sent mail — replies matched via `In-Reply-To` |
+| `sent_at` / `replied_at` | TIMESTAMPTZ | nullable |
+| `reply_snippet` | TEXT | first ~300 chars of the client's reply |
+
 ### `user_memory`
 
 Durable facts and preferences the AI assistant saved about the user (via the

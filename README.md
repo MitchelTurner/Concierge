@@ -118,6 +118,8 @@ STALL_DAYS=4                            # default stall threshold
 TZ=America/Chicago                      # default timezone for new signups
 ANTHROPIC_API_KEY=                      # optional — enables AI assistant
 OPENAI_API_KEY=                         # optional — enables Telegram voice-note transcription
+SMTP_HOST= SMTP_PORT= SMTP_USER= SMTP_PASS= SMTP_FROM=   # optional — client outreach email sending
+IMAP_HOST= IMAP_PORT= IMAP_USER= IMAP_PASS=              # optional — client reply detection
 ```
 
 ### 5. Sign up and link Telegram
@@ -233,8 +235,12 @@ Link your account first (`/link CODE` from dashboard Settings). Then:
 | `/done {id}` | Mark the next open task complete (stamps progress), then prompt for a new one |
 | `/progress {id} [note]` | Log progress without completing a task — resets the stall clock; an optional note is saved to `daily_log` |
 | `/status {id} {status}` | Update status (`idea`/`active`/`blocked`/`shipped`/`paid`/`archived`) |
+| `/contact {id} {name} {email}` | Save the client contact for a project |
+| `/contacts` | List saved contacts |
+| `/draft {id} {what you're waiting on}` | Draft a chase-up email to the project's client |
+| `/outreach` | List open drafts and sent emails awaiting a reply |
 | `/skip` | Skip the evening check-in (reply to the check-in prompt) |
-| `/cancel` | Abort an in-progress `/add` or `/done` follow-up |
+| `/cancel` | Abort an in-progress `/add`, `/done` follow-up, or draft edit |
 | `/reset` | Clear the AI assistant's conversation memory for this chat |
 
 **Talk to it in plain language.** When `ANTHROPIC_API_KEY` is set, any message
@@ -258,6 +264,36 @@ alternative from a different project), and **😴 Not today** (skip guilt-free).
 (9:00–20:59 local) and pings you when a project's deadline enters the 3-day
 window or an active project crosses your stall threshold. Each alert fires
 once per condition — progress on a project re-arms its stall alert.
+
+## Client outreach — chase what's blocking you
+
+When a project is stuck waiting on a client (photos, content, approval,
+payment), Concierge writes the chase-up email, you review and send it from
+Telegram, and it tells you when the client replies.
+
+1. **Save the contact** once per project: `/contact 3 Joe Rossi joe@pizza.com`
+   (or in the dashboard's **Contacts** section, or tell the assistant
+   *"the client for project 3 is Joe, joe@pizza.com"*).
+2. **Draft the email**: `/draft 3 photos of the finished kitchen` — the AI
+   writes a short, friendly nudge using project context and your saved
+   memories (a plain template is used when AI is not configured). You can also
+   just tell the assistant *"I'm still waiting on photos from Joe — chase him"*.
+3. **Review in Telegram**: the draft arrives with **📤 Send**, **✏️ Edit**
+   (describe changes in plain language or paste a replacement), and
+   **🗑 Discard** buttons.
+4. **Send** goes out over SMTP (`SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/
+   `SMTP_PASS`/`SMTP_FROM` — any provider, e.g. a Gmail app password) and
+   stamps progress on the project.
+5. **Reply detection**: with IMAP configured (`IMAP_HOST`/`IMAP_USER`/
+   `IMAP_PASS`), the inbox is polled every 5 minutes while replies are
+   outstanding. Replies are matched by the email's `In-Reply-To` header (or
+   sender address as a fallback), you get a Telegram ping with a snippet, and
+   the AI adds a one-line read on whether the client actually sent what you
+   need. `/outreach` shows what's still pending.
+
+Setting a project to `blocked` (via `/status`) reminds you that `/draft` exists
+when a contact is on file. Without SMTP you can still draft and copy emails;
+without IMAP everything works except the automatic reply notification.
 
 ## Web dashboard
 
@@ -325,6 +361,9 @@ API (authenticated routes require `Authorization: Bearer <token>`):
 | `GET /api/goals` · `POST /api/goals` | List / create goals |
 | `PATCH /api/goals/:id` · `DELETE /api/goals/:id` | Edit / delete a goal |
 | `GET /api/memories` · `DELETE /api/memories/:id` | List / remove assistant memories |
+| `GET /api/contacts` · `POST /api/contacts` | List / create client contacts |
+| `PATCH /api/contacts/:id` · `DELETE /api/contacts/:id` | Edit / delete a contact |
+| `GET /api/outreach` | Open outreach (drafts + sent awaiting reply); drafting/sending lives in Telegram |
 | `GET /api/chat/status` | Whether the AI agent is enabled + its model |
 | `POST /api/chat` | Send `{ messages: [{role, content}] }`, get `{ reply }` |
 
@@ -403,6 +442,8 @@ concierge/
     alerts.ts      # event-driven deadline/stall pings (once per condition)
     calendar.ts    # ICS feed fetch/parse → today's events (nudge + AI context)
     transcribe.ts  # OpenAI voice-note transcription (optional)
+    email.ts       # SMTP sending + fallback chase-up template (optional)
+    inbox.ts       # IMAP polling → client reply detection (optional)
     server.ts      # Express API + static dashboard
     ai.ts          # Anthropic assistant with live context + tools
     daily.ts       # one-shot: send allocation to one user and exit

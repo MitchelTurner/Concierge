@@ -51,8 +51,10 @@ Business logic is centralized in `scoring.ts` and reused everywhere:
 | `alerts.ts` | Proactive deadline/stall pings, deduped via one-shot `app_meta` claims |
 | `calendar.ts` | ICS feed fetch (cached) + parse → today's events for nudges and AI context |
 | `transcribe.ts` | Optional OpenAI transcription for Telegram voice notes |
+| `email.ts` | Optional SMTP sending for client outreach + fallback draft template |
+| `inbox.ts` | Optional IMAP polling — matches client replies to sent outreach, notifies via Telegram |
 | `server.ts` | REST API under `/api/*`, serves `public/index.html` |
-| `ai.ts` | Anthropic chat with live DB context + tools, memory, check-in parsing |
+| `ai.ts` | Anthropic chat with live DB context + tools, memory, check-in parsing, email drafting |
 | `daily.ts` | One-shot CLI: send today's message to one user and exit |
 
 ## Data flow examples
