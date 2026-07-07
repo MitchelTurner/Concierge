@@ -256,6 +256,17 @@ transcribed, saved as a call note, and (with the AI assistant enabled) mined
 for suggested follow-up tasks. The transcript is seeded into the assistant
 conversation, so replying *"add those to project 3"* saves the tasks.
 
+**Record calls live from the dashboard.** In the **Call notes** tab, hit
+**Record & transcribe** to capture a call or meeting straight from your
+microphone. Audio is streamed in short segments to the transcription endpoint
+(`OPENAI_API_KEY`), so the transcript fills the notes box in near real time.
+When the AI assistant is also configured (`ANTHROPIC_API_KEY`), a live panel
+keeps two things up to date as you talk: **running notes** (key points,
+decisions, commitments) and **questions to ask next** (scope, budget, timeline,
+close). Link the capture to a project first and the suggestions use that
+project's context. Stop the recording or hit **Save note** to store the
+transcript like any other call note — then **Extract tasks** as usual.
+
 **Morning nudge buttons.** The daily focus message ships with inline buttons:
 **✅ On it** (commit to the task), **🔁 Swap task** (get the next-best
 alternative from a different project), and **😴 Not today** (skip guilt-free).
@@ -357,6 +368,9 @@ API (authenticated routes require `Authorization: Bearer <token>`):
 | `GET /api/meeting-notes` · `POST /api/meeting-notes` | List / create call & meeting notes |
 | `PATCH /api/meeting-notes/:id` · `DELETE /api/meeting-notes/:id` | Edit / delete a note |
 | `POST /api/meeting-notes/:id/extract-tasks` | AI follow-up tasks from a note |
+| `GET /api/notes/record-status` | Whether live recording (transcription) and live assist (AI) are configured |
+| `POST /api/transcribe` | Transcribe one audio segment (raw audio body) → `{ text }` |
+| `POST /api/meeting-notes/live-assist` | Running transcript → `{ notes[], questions[] }` for live capture |
 | `GET /api/daily-log` | Recent progress log entries (Telegram check-ins & `/progress`) |
 | `GET /api/goals` · `POST /api/goals` | List / create goals |
 | `PATCH /api/goals/:id` · `DELETE /api/goals/:id` | Edit / delete a goal |

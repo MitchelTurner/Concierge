@@ -808,6 +808,124 @@ export async function suggestTasksFromMeetingNote(
   return lines.slice(0, 8);
 }
 
+export interface LiveAssist {
+  notes: string[];
+  questions: string[];
+}
+
+const LIVE_ASSIST_TOOL: Anthropic.Tool = {
+  name: "live_assist",
+  description: "Return the running notes and the best questions to ask next.",
+  input_schema: {
+    type: "object",
+    properties: {
+      notes: {
+        type: "array",
+        items: { type: "string" },
+        description: "3-6 short bullet notes capturing key points, decisions, and commitments so far",
+      },
+      questions: {
+        type: "array",
+        items: { type: "string" },
+        description: "2-4 sharp questions the user should ask next to move the conversation/deal forward",
+      },
+    },
+    required: ["notes", "questions"],
+  },
+};
+
+/**
+ * Real-time meeting/call companion. Given the running transcript so far, return
+ * a tight set of summary notes and the smartest questions to ask next. Used by
+ * the dashboard's live recording feature to update as the conversation happens.
+ */
+export async function liveMeetingAssist(
+  config: Config,
+  userId: number,
+  transcript: string,
+  projectId?: number | null
+): Promise<LiveAssist> {
+  if (!isAiConfigured(config)) {
+    throw new Error("AI not configured (set ANTHROPIC_API_KEY).");
+  }
+
+  const trimmed = transcript.trim();
+  if (!trimmed) return { notes: [], questions: [] };
+
+  const contextLines: string[] = [];
+  if (projectId != null) {
+    const idea = await getProjectWithTasks(userId, projectId);
+    if (idea) {
+      const open = idea.tasks.filter((t) => !t.done).map((t) => t.title);
+      contextLines.push(
+        `This call relates to the project "${idea.name}".`,
+        idea.notes ? `Project context: ${idea.notes}` : "",
+        open.length ? `Open tasks: ${open.join("; ")}` : ""
+      );
+    }
+  }
+  const memories = await getMemories(userId);
+  if (memories.length) {
+    contextLines.push(
+      `About the user: ${memories.slice(0, 8).map((m) => m.content).join("; ")}`
+    );
+  }
+
+  // Cap transcript length so latency stays low; keep the most recent context.
+  const MAX_CHARS = 6000;
+  const clipped = trimmed.length > MAX_CHARS ? `…${trimmed.slice(-MAX_CHARS)}` : trimmed;
+
+  const client = new Anthropic({ apiKey: config.anthropicApiKey });
+  const response = await client.messages.create({
+    model: config.anthropicModel,
+    max_tokens: 512,
+    system: [
+      "You are a live note-taker sitting in on a freelancer's phone call or meeting.",
+      "You receive the running (possibly partial, imperfect) transcript and must keep two things up to date:",
+      "1) concise running notes — key points, decisions, numbers, dates, and commitments;",
+      "2) the sharpest questions the user should ask next to clarify scope, budget, timeline, or close the deal.",
+      "Be specific and grounded in what was actually said. No filler. Do not invent facts.",
+      "Always answer via the live_assist tool.",
+    ].join("\n"),
+    tools: [LIVE_ASSIST_TOOL],
+    tool_choice: { type: "tool", name: "live_assist" },
+    messages: [
+      {
+        role: "user",
+        content: [
+          contextLines.filter(Boolean).join("\n"),
+          contextLines.filter(Boolean).length ? "" : "",
+          "Transcript so far:",
+          clipped,
+        ]
+          .filter((s) => s !== undefined)
+          .join("\n"),
+      },
+    ],
+  });
+
+  const toolUse = response.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
+  );
+  const input =
+    toolUse?.input && typeof toolUse.input === "object"
+      ? (toolUse.input as Record<string, unknown>)
+      : {};
+
+  const toLines = (v: unknown, cap: number): string[] => {
+    if (!Array.isArray(v)) return [];
+    return v
+      .map((s) => (typeof s === "string" ? s.trim() : ""))
+      .filter((s) => s.length > 0 && s.length < 300)
+      .slice(0, cap);
+  };
+
+  return {
+    notes: toLines(input.notes, 6),
+    questions: toLines(input.questions, 4),
+  };
+}
+
 /**
  * One-shot chase-up email generation for /draft. Uses project context and
  * saved memories so tone and details fit the user.

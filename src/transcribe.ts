@@ -1,7 +1,8 @@
 /**
- * Voice-note transcription via the OpenAI audio API (optional — enabled when
- * OPENAI_API_KEY is set). Telegram voice messages are OGG/Opus, which the
- * transcription endpoint accepts directly.
+ * Audio transcription via the OpenAI audio API (optional — enabled when
+ * OPENAI_API_KEY is set). Used for Telegram voice messages (OGG/Opus) and the
+ * dashboard's live call recording, which streams short WebM/MP4 segments. All
+ * of these formats are accepted by the transcription endpoint directly.
  */
 import type { Config } from "./config.js";
 

@@ -907,6 +907,112 @@
         line-height: 1.6;
       }
 
+      /* ── Live recording ── */
+      .record-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+      }
+
+      .record-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        padding: 10px 16px;
+        border-radius: var(--radius);
+        border: 1px solid rgba(239, 68, 68, 0.35);
+        background: rgba(239, 68, 68, 0.08);
+        color: #f87171;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.18s var(--ease);
+      }
+
+      .record-btn:hover { border-color: rgba(239, 68, 68, 0.6); background: rgba(239, 68, 68, 0.14); }
+      .record-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+      .record-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #f87171;
+        flex-shrink: 0;
+      }
+
+      .record-btn.recording {
+        border-color: rgba(239, 68, 68, 0.6);
+        background: rgba(239, 68, 68, 0.16);
+        color: #fecaca;
+      }
+
+      .record-btn.recording .record-dot { animation: rec-pulse 1.1s ease-in-out infinite; }
+
+      @keyframes rec-pulse {
+        0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+        50% { opacity: 0.5; box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+      }
+
+      .record-status { font-size: 12px; color: var(--text-2); }
+
+      .transcribing-flag {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--accent-2);
+        margin-left: 8px;
+      }
+
+      .live-assist {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin: 4px 0 18px;
+      }
+
+      @media (max-width: 640px) { .live-assist { grid-template-columns: 1fr; } }
+
+      .live-assist-col {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 14px 16px;
+      }
+
+      .live-assist-title {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin: 0 0 10px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--accent-2);
+      }
+
+      .live-assist-title svg { width: 14px; height: 14px; }
+
+      .live-list {
+        margin: 0;
+        padding-left: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+
+      .live-list li {
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--text-2);
+      }
+
+      .live-list li.muted { list-style: none; margin-left: -18px; }
+
       .note-card {
         background: var(--surface);
         border: 1px solid var(--border);
@@ -1625,9 +1731,26 @@
                     <option value="">— None —</option>
                   </select>
                 </div>
+                <div class="record-bar">
+                  <button type="button" id="record-btn" class="record-btn" onclick="toggleRecording()">
+                    <span class="record-dot"></span>
+                    <span id="record-btn-label">Record &amp; transcribe</span>
+                  </button>
+                  <span id="record-status" class="record-status"></span>
+                </div>
                 <div class="field capture-notes">
-                  <label>Notes</label>
-                  <textarea id="capture-body" placeholder="Jot down key points, decisions, and follow-ups as you go…" onkeydown="captureKeydown(event)"></textarea>
+                  <label>Notes <span id="transcribing-flag" class="transcribing-flag hidden">transcribing…</span></label>
+                  <textarea id="capture-body" placeholder="Jot down key points, decisions, and follow-ups as you go — or hit Record to auto-transcribe." onkeydown="captureKeydown(event)"></textarea>
+                </div>
+                <div id="live-assist" class="live-assist hidden">
+                  <div class="live-assist-col">
+                    <p class="live-assist-title"><svg><use href="#icon-check"/></svg> Live notes</p>
+                    <ul id="live-notes" class="live-list"><li class="muted">Listening…</li></ul>
+                  </div>
+                  <div class="live-assist-col">
+                    <p class="live-assist-title"><svg><use href="#icon-bot"/></svg> Questions to ask</p>
+                    <ul id="live-questions" class="live-list"><li class="muted">Listening…</li></ul>
+                  </div>
                 </div>
                 <div class="card-actions" style="margin-top:0;padding-top:0;border-top:none">
                   <button class="primary" onclick="saveCapture()">
@@ -2126,12 +2249,246 @@
       }
 
       function clearCapture() {
+        if (recording) stopRecording();
         $("capture-title").value = "";
         $("capture-participants").value = "";
         $("capture-body").value = "";
         $("capture-project").value = "";
+        resetLiveAssist();
         setCaptureType("call");
         $("capture-body").focus();
+      }
+
+      // ── Live recording: mic → segmented transcription → live notes/questions ──
+      const SEGMENT_MS = 7000;
+      const ASSIST_DEBOUNCE_MS = 3500;
+      let recording = false;
+      let recordStatus = null;
+      let mediaStream = null;
+      let mediaRecorder = null;
+      let segmentTimer = null;
+      let assistTimer = null;
+      let lastAssistedLen = 0;
+      let inflightSegments = 0;
+
+      async function fetchRecordStatus() {
+        if (recordStatus) return recordStatus;
+        try {
+          recordStatus = await api("GET", "/notes/record-status");
+        } catch (e) {
+          recordStatus = { transcription: false, assist: false };
+        }
+        return recordStatus;
+      }
+
+      async function initRecordUI() {
+        const btn = $("record-btn");
+        const status = $("record-status");
+        if (!btn) return;
+        const supported = typeof navigator !== "undefined" && navigator.mediaDevices && window.MediaRecorder;
+        const rs = await fetchRecordStatus();
+        if (!supported) {
+          btn.disabled = true;
+          status.textContent = "Recording needs a modern browser with microphone support.";
+        } else if (!rs.transcription) {
+          btn.disabled = true;
+          status.textContent = "Set OPENAI_API_KEY to enable recording & transcription.";
+        } else {
+          btn.disabled = false;
+          status.textContent = rs.assist
+            ? "Records, transcribes, and suggests notes & questions live."
+            : "Records and transcribes live (set ANTHROPIC_API_KEY for live notes & questions).";
+        }
+      }
+
+      function pickAudioMime() {
+        const types = [
+          "audio/webm;codecs=opus",
+          "audio/webm",
+          "audio/ogg;codecs=opus",
+          "audio/mp4",
+        ];
+        for (const t of types) {
+          try {
+            if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+          } catch (e) {}
+        }
+        return "";
+      }
+
+      function updateRecordUI() {
+        const btn = $("record-btn");
+        const label = $("record-btn-label");
+        btn.classList.toggle("recording", recording);
+        label.textContent = recording ? "Stop recording" : "Record & transcribe";
+        $("record-status").textContent = recording
+          ? "Recording… speak naturally. Notes update every few seconds."
+          : (recordStatus && recordStatus.assist
+              ? "Records, transcribes, and suggests notes & questions live."
+              : "Records and transcribes live.");
+      }
+
+      async function toggleRecording() {
+        if (recording) {
+          stopRecording();
+        } else {
+          await startRecording();
+        }
+      }
+
+      async function startRecording() {
+        const rs = await fetchRecordStatus();
+        if (!rs.transcription) {
+          toast("Recording not configured (set OPENAI_API_KEY)", true);
+          return;
+        }
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (e) {
+          toast("Microphone access was denied", true);
+          return;
+        }
+        recording = true;
+        lastAssistedLen = 0;
+        if (rs.assist) {
+          $("live-assist").classList.remove("hidden");
+          setLiveList("live-notes", []);
+          setLiveList("live-questions", []);
+        }
+        updateRecordUI();
+        startSegment();
+      }
+
+      function startSegment() {
+        if (!recording || !mediaStream) return;
+        const mime = pickAudioMime();
+        const chunks = [];
+        let recorder;
+        try {
+          recorder = new MediaRecorder(mediaStream, mime ? { mimeType: mime } : undefined);
+        } catch (e) {
+          toast("Recording is not supported in this browser", true);
+          stopRecording();
+          return;
+        }
+        mediaRecorder = recorder;
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size) chunks.push(e.data);
+        };
+        recorder.onstop = () => {
+          const type = mime || "audio/webm";
+          const blob = new Blob(chunks, { type });
+          if (recording) startSegment();
+          if (blob.size > 1400) sendSegment(blob, type);
+        };
+        recorder.start();
+        segmentTimer = setTimeout(() => {
+          if (recorder.state !== "inactive") recorder.stop();
+        }, SEGMENT_MS);
+      }
+
+      function stopRecording() {
+        recording = false;
+        if (segmentTimer) {
+          clearTimeout(segmentTimer);
+          segmentTimer = null;
+        }
+        try {
+          if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+        } catch (e) {}
+        if (mediaStream) {
+          mediaStream.getTracks().forEach((t) => t.stop());
+          mediaStream = null;
+        }
+        mediaRecorder = null;
+        updateRecordUI();
+        // One final assist pass over whatever was captured.
+        if (recordStatus && recordStatus.assist && $("capture-body").value.trim()) {
+          scheduleAssist(true);
+        }
+      }
+
+      async function sendSegment(blob, type) {
+        const ext = type.includes("mp4") ? "mp4" : type.includes("ogg") ? "ogg" : "webm";
+        inflightSegments += 1;
+        $("transcribing-flag").classList.remove("hidden");
+        try {
+          const res = await fetch("/api/transcribe", {
+            method: "POST",
+            headers: {
+              "content-type": type,
+              "x-filename": "segment." + ext,
+              ...(token ? { authorization: "Bearer " + token } : {}),
+            },
+            body: blob,
+          });
+          if (res.status === 401) {
+            logout();
+            return;
+          }
+          const data = res.headers.get("content-type")?.includes("json") ? await res.json() : null;
+          if (!res.ok) throw new Error((data && data.error) || res.statusText);
+          const text = (data && data.text ? data.text : "").trim();
+          if (text) appendTranscript(text);
+        } catch (e) {
+          $("record-status").textContent = "Transcription hiccup: " + e.message;
+        } finally {
+          inflightSegments -= 1;
+          if (inflightSegments <= 0) $("transcribing-flag").classList.add("hidden");
+        }
+      }
+
+      function appendTranscript(text) {
+        const ta = $("capture-body");
+        const existing = ta.value;
+        ta.value = existing ? existing.replace(/\s+$/, "") + " " + text : text;
+        ta.scrollTop = ta.scrollHeight;
+        if (recordStatus && recordStatus.assist) scheduleAssist(false);
+      }
+
+      function scheduleAssist(immediate) {
+        if (assistTimer) clearTimeout(assistTimer);
+        assistTimer = setTimeout(runLiveAssist, immediate ? 200 : ASSIST_DEBOUNCE_MS);
+      }
+
+      async function runLiveAssist() {
+        const transcript = $("capture-body").value.trim();
+        if (!transcript || transcript.length < 40) return;
+        if (transcript.length === lastAssistedLen) return;
+        lastAssistedLen = transcript.length;
+        const projectRaw = $("capture-project").value;
+        try {
+          const data = await api("POST", "/meeting-notes/live-assist", {
+            transcript,
+            project_id: projectRaw ? Number(projectRaw) : null,
+          });
+          $("live-assist").classList.remove("hidden");
+          setLiveList("live-notes", data.notes || []);
+          setLiveList("live-questions", data.questions || []);
+        } catch (e) {
+          // Non-fatal — keep recording even if the assist call fails.
+        }
+      }
+
+      function setLiveList(id, items) {
+        const el = $(id);
+        if (!el) return;
+        if (!items || !items.length) {
+          el.innerHTML = '<li class="muted">' + (recording ? "Listening…" : "Nothing yet.") + "</li>";
+          return;
+        }
+        el.innerHTML = items.map((s) => `<li>${esc(s)}</li>`).join("");
+      }
+
+      function resetLiveAssist() {
+        lastAssistedLen = 0;
+        if (assistTimer) {
+          clearTimeout(assistTimer);
+          assistTimer = null;
+        }
+        $("live-assist").classList.add("hidden");
+        setLiveList("live-notes", []);
+        setLiveList("live-questions", []);
       }
 
       async function saveCapture() {
@@ -2147,6 +2504,8 @@
         }
 
         if (!title && participants) title = `Call with ${participants}`;
+
+        if (recording) stopRecording();
 
         try {
           await api("POST", "/meeting-notes", {
@@ -2912,7 +3271,10 @@
         updatePageHeader(name);
         if (name === "notes") {
           loadMeetingNotes().catch((e) => toast(e.message, true));
+          initRecordUI().catch(() => {});
           $("capture-body").focus();
+        } else if (recording) {
+          stopRecording();
         }
         if (name === "assistant") {
           ensureChatReady();

@@ -63,7 +63,15 @@ import {
   type ProjectPatch,
   type ProjectStatus,
 } from "./db.js";
-import { chat, isAiConfigured, suggestTasksForProject, suggestTasksFromMeetingNote, type ChatMessage } from "./ai.js";
+import {
+  chat,
+  isAiConfigured,
+  liveMeetingAssist,
+  suggestTasksForProject,
+  suggestTasksFromMeetingNote,
+  type ChatMessage,
+} from "./ai.js";
+import { isTranscriptionConfigured, transcribeAudio } from "./transcribe.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, "..", "public");
@@ -847,6 +855,82 @@ export function createServer(config: Config): express.Express {
       res.status(502).json({ error: msg });
     }
   });
+
+  // --- Live recording: transcription + real-time assist ---
+
+  // Whether the record feature's two halves are available.
+  api.get("/notes/record-status", (_req, res) => {
+    res.json({
+      transcription: isTranscriptionConfigured(config),
+      assist: isAiConfigured(config),
+    });
+  });
+
+  // Transcribe one audio segment. Body is the raw audio bytes (any codec the
+  // browser's MediaRecorder produced); content-type carries the mime type.
+  api.post(
+    "/transcribe",
+    express.raw({ type: () => true, limit: "25mb" }),
+    async (req, res) => {
+      if (!isTranscriptionConfigured(config)) {
+        return res.status(501).json({
+          error: "Transcription not configured. Set OPENAI_API_KEY to enable recording.",
+        });
+      }
+      const buffer = req.body;
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        return res.status(400).json({ error: "empty audio body" });
+      }
+      const mimeType = (req.header("content-type") || "audio/webm").split(";")[0].trim();
+      const headerName = req.header("x-filename");
+      const filename = headerName && /^[\w.\- ]{1,80}$/.test(headerName) ? headerName : "segment.webm";
+      try {
+        const arrayBuffer = buffer.buffer.slice(
+          buffer.byteOffset,
+          buffer.byteOffset + buffer.byteLength
+        ) as ArrayBuffer;
+        const text = await transcribeAudio(config, arrayBuffer, filename, mimeType);
+        res.json({ text });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.status(502).json({ error: msg });
+      }
+    }
+  );
+
+  // Given the running transcript, return live notes + questions to ask next.
+  api.post(
+    "/meeting-notes/live-assist",
+    rateLimit(40, RATE_WINDOW_MS, (req) => `live-assist:${req.userId ?? req.ip}`),
+    async (req, res) => {
+      if (!isAiConfigured(config)) {
+        return res.status(501).json({
+          error: "AI not configured. Set ANTHROPIC_API_KEY to enable live notes and questions.",
+        });
+      }
+      const body = req.body ?? {};
+      const transcript = typeof body.transcript === "string" ? body.transcript : "";
+      if (!transcript.trim()) return res.json({ notes: [], questions: [] });
+
+      let projectId: number | null = null;
+      if (body.project_id !== undefined && body.project_id !== null && body.project_id !== "") {
+        const n = toInt(body.project_id);
+        if (n === null) return res.status(400).json({ error: "project_id must be an integer" });
+        if (!(await getProject(req.userId!, n))) {
+          return res.status(400).json({ error: "project not found" });
+        }
+        projectId = n;
+      }
+
+      try {
+        const result = await liveMeetingAssist(config, req.userId!, transcript, projectId);
+        res.json(result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.status(502).json({ error: msg });
+      }
+    }
+  );
 
   // --- Daily progress log ---
   api.get("/daily-log", async (req, res) => {
