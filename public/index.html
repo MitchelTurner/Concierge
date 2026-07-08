@@ -837,12 +837,18 @@
       .card-actions .spacer { flex: 1; }
 
       /* ── Goals ── */
+      .goals-grid {
+        display: grid;
+        gap: 14px;
+        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        align-items: start;
+      }
+
       .goal {
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius-lg);
         padding: 18px 20px;
-        margin-bottom: 10px;
         backdrop-filter: blur(12px);
         transition: border-color 0.2s, box-shadow 0.2s;
       }
@@ -853,6 +859,181 @@
       }
 
       .goal .card-actions { margin-top: 12px; padding-top: 12px; }
+
+      .goal-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 14px;
+      }
+
+      .goal-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        background: var(--accent-subtle);
+        border: 1px solid rgba(139, 92, 246, 0.25);
+        color: var(--accent-2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .goal-icon svg { width: 16px; height: 16px; }
+
+      .goal-body { flex: 1; min-width: 0; }
+
+      .goal-body h3 {
+        margin: 0 0 4px;
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        line-height: 1.35;
+      }
+
+      .goal-body p {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.55;
+        color: var(--text-2);
+        white-space: pre-wrap;
+      }
+
+      .icon-btn {
+        padding: 6px 8px;
+        border-radius: var(--radius-xs);
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--text-3);
+        line-height: 0;
+        flex-shrink: 0;
+      }
+
+      .icon-btn:hover {
+        color: var(--text);
+        border-color: var(--border);
+        background: var(--bg-elevated);
+      }
+
+      .icon-btn svg { width: 14px; height: 14px; }
+
+      /* ── Ideas toolbar & compact cards ── */
+      .ideas-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+
+      .filter-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+
+      .fchip {
+        font-size: 12px;
+        font-weight: 600;
+        padding: 6px 12px;
+        border-radius: 20px;
+        border: 1px solid var(--border);
+        background: var(--bg-elevated);
+        color: var(--text-2);
+        cursor: pointer;
+        transition: all 0.15s var(--ease);
+      }
+
+      .fchip:hover { border-color: var(--border-strong); color: var(--text); }
+
+      .fchip.active {
+        background: var(--accent-subtle);
+        border-color: rgba(139, 92, 246, 0.4);
+        color: var(--accent-2);
+      }
+
+      .toolbar-right { display: flex; align-items: center; gap: 8px; }
+
+      .pill.status-idea { color: var(--text-2); }
+      .pill.status-active { color: var(--accent-2); border-color: rgba(139, 92, 246, 0.3); background: var(--accent-subtle); }
+      .pill.status-blocked { color: var(--fast); border-color: rgba(245, 158, 11, 0.25); background: var(--fast-subtle); }
+      .pill.status-shipped, .pill.status-paid { color: var(--passive); border-color: rgba(52, 211, 153, 0.25); background: var(--passive-subtle); }
+      .pill.status-archived { opacity: 0.6; }
+
+      .idea-card.archived { opacity: 0.65; }
+
+      .idea-next {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        font-size: 13.5px;
+        line-height: 1.5;
+        color: var(--text);
+        margin: 0 0 12px;
+      }
+
+      .idea-next .next-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        color: var(--accent-2);
+        background: var(--accent-subtle);
+        border: 1px solid rgba(139, 92, 246, 0.25);
+        padding: 2px 7px;
+        border-radius: 5px;
+        flex-shrink: 0;
+      }
+
+      .idea-next.empty { color: var(--text-3); }
+
+      .idea-progress {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      .idea-progress-track {
+        flex: 1;
+        height: 5px;
+        border-radius: 3px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        overflow: hidden;
+      }
+
+      .idea-progress-fill {
+        height: 100%;
+        border-radius: 3px;
+        background: linear-gradient(90deg, var(--accent), var(--accent-2));
+        transition: width 0.25s var(--ease);
+      }
+
+      .idea-progress-label {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-3);
+        flex-shrink: 0;
+      }
+
+      .idea-tasks-toggle {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 9px 12px;
+        border-radius: var(--radius-xs);
+        border: 1px solid var(--border);
+        background: var(--bg-subtle);
+        color: var(--text-2);
+        font-size: 12.5px;
+        font-weight: 600;
+      }
+
+      .idea-tasks-toggle:hover { border-color: var(--border-strong); color: var(--text); }
+
+      .idea-tasks-toggle .caret { transition: transform 0.18s var(--ease); font-size: 10px; }
+      .idea-tasks-toggle.open .caret { transform: rotate(180deg); }
+
+      .idea-tasks-body { margin-top: 12px; }
 
       /* ── Meeting notes ── */
       .capture-card {
@@ -1446,6 +1627,9 @@
         background: rgba(255, 255, 255, 0.01);
       }
 
+      .grid .empty-state,
+      .goals-grid .empty-state { grid-column: 1 / -1; }
+
       .tabs { display: none; }
 
       /* ── Responsive ── */
@@ -1462,8 +1646,12 @@
           border: 1px solid var(--border);
           border-radius: var(--radius);
           margin-bottom: 20px;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
         }
-        .mobile-tabs .nav-item { flex: 1; justify-content: center; padding: 10px 8px; }
+        .mobile-tabs::-webkit-scrollbar { display: none; }
+        .mobile-tabs .nav-item { flex: 0 0 auto; justify-content: center; padding: 10px 14px; white-space: nowrap; }
         .stats-row { grid-template-columns: repeat(2, 1fr); }
         .page-header, main { padding-left: 20px; padding-right: 20px; }
       }
@@ -1518,6 +1706,12 @@
       </symbol>
       <symbol id="icon-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+      </symbol>
+      <symbol id="icon-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+      </symbol>
+      <symbol id="icon-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
       </symbol>
     </svg>
 
@@ -1580,9 +1774,21 @@
             </div>
           </div>
           <nav class="sidebar-nav">
-            <button id="tabbtn-manage" class="nav-item active" onclick="switchTab('manage')">
+            <button id="tabbtn-today" class="nav-item active" onclick="switchTab('today')">
+              <svg><use href="#icon-zap"/></svg>
+              Today
+            </button>
+            <button id="tabbtn-ideas" class="nav-item" onclick="switchTab('ideas')">
               <svg><use href="#icon-grid"/></svg>
-              Workspace
+              Ideas
+            </button>
+            <button id="tabbtn-goals" class="nav-item" onclick="switchTab('goals')">
+              <svg><use href="#icon-target"/></svg>
+              Goals
+            </button>
+            <button id="tabbtn-clients" class="nav-item" onclick="switchTab('clients')">
+              <svg><use href="#icon-users"/></svg>
+              Clients
             </button>
             <button id="tabbtn-notes" class="nav-item" onclick="switchTab('notes')">
               <svg><use href="#icon-phone"/></svg>
@@ -1620,13 +1826,16 @@
 
           <main>
             <div class="mobile-tabs">
-              <button class="nav-item active" onclick="switchTab('manage')">Workspace</button>
-              <button class="nav-item" onclick="switchTab('notes')">Notes</button>
-              <button class="nav-item" onclick="switchTab('assistant')">Assistant</button>
-              <button class="nav-item" onclick="switchTab('settings')">Settings</button>
+              <button class="nav-item active" data-tab="today" onclick="switchTab('today')">Today</button>
+              <button class="nav-item" data-tab="ideas" onclick="switchTab('ideas')">Ideas</button>
+              <button class="nav-item" data-tab="goals" onclick="switchTab('goals')">Goals</button>
+              <button class="nav-item" data-tab="clients" onclick="switchTab('clients')">Clients</button>
+              <button class="nav-item" data-tab="notes" onclick="switchTab('notes')">Notes</button>
+              <button class="nav-item" data-tab="assistant" onclick="switchTab('assistant')">Assistant</button>
+              <button class="nav-item" data-tab="settings" onclick="switchTab('settings')">Settings</button>
             </div>
 
-            <section id="tab-manage">
+            <section id="tab-today">
               <div id="focus-banner" class="focus-banner hidden">
                 <div class="focus-eyebrow">Today's focus</div>
                 <h2 id="focus-title">—</h2>
@@ -1662,7 +1871,38 @@
                 <p class="muted" style="font-size:13px;margin:-4px 0 12px">Captured from Telegram check-ins and /progress — your record of what you actually did.</p>
                 <div id="progress-log" class="progress-log"></div>
               </div>
+            </section>
 
+            <section id="tab-ideas" class="hidden">
+              <div class="ideas-toolbar">
+                <div class="filter-chips" id="idea-filter-chips">
+                  <button type="button" class="fchip active" data-filter="all" onclick="setIdeaFilter('all')">All</button>
+                  <button type="button" class="fchip" data-filter="active" onclick="setIdeaFilter('active')">Active</button>
+                  <button type="button" class="fchip" data-filter="idea" onclick="setIdeaFilter('idea')">Idea</button>
+                  <button type="button" class="fchip" data-filter="blocked" onclick="setIdeaFilter('blocked')">On hold</button>
+                  <button type="button" class="fchip" data-filter="done" onclick="setIdeaFilter('done')">Done / paid</button>
+                  <button type="button" class="fchip" data-filter="archived" onclick="setIdeaFilter('archived')">Archived</button>
+                </div>
+                <div class="toolbar-right">
+                  <select id="idea-sort" style="width:auto" onchange="setIdeaSort(this.value)">
+                    <option value="score">Sort: score</option>
+                    <option value="newest">Sort: newest</option>
+                    <option value="deadline">Sort: deadline</option>
+                    <option value="name">Sort: name</option>
+                  </select>
+                  <button class="primary" onclick="addProject()">
+                    <svg><use href="#icon-plus"/></svg>
+                    New idea
+                  </button>
+                </div>
+              </div>
+              <p class="muted" style="font-size:13px;margin:0 0 16px">
+                <span id="projects-count">0</span> ideas · click a card to check off tasks, or “Edit” for scoring and details.
+              </p>
+              <div id="projects" class="grid"></div>
+            </section>
+
+            <section id="tab-goals" class="hidden">
               <div class="section-block">
                 <div class="section-head">
                   <h2>
@@ -1670,41 +1910,30 @@
                     Goals
                     <span id="goals-count" class="count">0</span>
                   </h2>
-                  <button onclick="addGoal()">
+                  <button class="primary" onclick="addGoal()">
                     <svg><use href="#icon-plus"/></svg>
                     Add goal
                   </button>
                 </div>
-                <div id="goals"></div>
+                <p class="muted" style="font-size:13px;margin:-4px 0 16px">North stars that frame what your ideas are working toward — the assistant reads these when it advises you.</p>
+                <div id="goals" class="goals-grid"></div>
               </div>
+            </section>
 
+            <section id="tab-clients" class="hidden">
               <div class="section-block">
                 <div class="section-head">
                   <h2>
                     Contacts
                     <span id="contacts-count" class="count">0</span>
                   </h2>
-                  <button onclick="addContactCard()">
+                  <button class="primary" onclick="addContactCard()">
                     <svg><use href="#icon-plus"/></svg>
                     Add contact
                   </button>
                 </div>
                 <p class="muted" style="font-size:13px;margin:-4px 0 12px">Client contacts per project — used for chase-up emails when something's stuck (draft with /draft in Telegram or ask the assistant).</p>
-                <div id="contacts"></div>
-              </div>
-
-              <div class="section-block">
-                <div class="section-head">
-                  <h2>
-                    Ideas
-                    <span id="projects-count" class="count">0</span>
-                  </h2>
-                  <button class="primary" onclick="addProject()">
-                    <svg><use href="#icon-plus"/></svg>
-                    New idea
-                  </button>
-                </div>
-                <div id="projects" class="grid"></div>
+                <div id="contacts" class="goals-grid"></div>
               </div>
             </section>
 
@@ -1882,7 +2111,10 @@
       let currentUser = null;
 
       const PAGE_TITLES = {
-        manage: { title: "Workspace", subtitle: "Score projects, sharpen next actions, and keep fast income work ahead of passive bets." },
+        today: { title: "Today", subtitle: "Your focus, momentum, and progress — at a glance." },
+        ideas: { title: "Ideas", subtitle: "Score projects, sharpen next actions, and keep fast income work ahead of passive bets." },
+        goals: { title: "Goals", subtitle: "Define what all of this is working toward." },
+        clients: { title: "Clients", subtitle: "The people behind each project — used for chase-up emails." },
         notes: { title: "Call notes", subtitle: "Capture notes during phone calls and meetings — fast and distraction-free." },
         assistant: { title: "Assistant", subtitle: "Review priorities, sharpen next actions, and optionally let AI save approved changes." },
         settings: { title: "Settings", subtitle: "Account, schedule, and Telegram integration." },
@@ -1935,7 +2167,7 @@
       }
 
       function updatePageHeader(tab) {
-        const meta = PAGE_TITLES[tab] || PAGE_TITLES.manage;
+        const meta = PAGE_TITLES[tab] || PAGE_TITLES.today;
         $("page-title").textContent = meta.title;
         $("page-subtitle").textContent = meta.subtitle;
       }
@@ -2070,9 +2302,30 @@
         const p = cachedProjects.find((x) => x.id === projectId);
         const card = document.querySelector(`.idea-card[data-id="${projectId}"]`);
         if (!p || !card) return;
-        const openCount = (p.tasks || []).filter((t) => !t.done).length;
-        const pills = card.querySelectorAll(".idea-meta .pill");
-        if (pills.length >= 3) pills[2].textContent = `${openCount} open`;
+        const tasks = p.tasks || [];
+        const openCount = tasks.filter((t) => !t.done).length;
+        const doneCount = tasks.length - openCount;
+
+        const toggleText = card.querySelector(".idea-tasks-toggle .toggle-text");
+        if (toggleText) toggleText.textContent = `Tasks · ${openCount} open`;
+
+        const nextLine = $("idea-next-" + projectId);
+        if (nextLine) {
+          const next = projectAction(p);
+          nextLine.classList.toggle("empty", !next);
+          const textEl = nextLine.querySelector(".next-text");
+          if (textEl) textEl.textContent = next || "No open task — add one below.";
+        }
+
+        const progress = $("idea-progress-" + projectId);
+        if (progress) {
+          progress.style.display = tasks.length ? "" : "none";
+          const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
+          const fill = progress.querySelector(".idea-progress-fill");
+          if (fill) fill.style.width = pct + "%";
+          const label = progress.querySelector(".idea-progress-label");
+          if (label) label.textContent = `${doneCount}/${tasks.length}`;
+        }
       }
 
       function refreshTaskSection(projectId) {
@@ -2110,37 +2363,14 @@
           .join("")}</div>`;
       }
 
-      function projectCard(p) {
-        const isNew = !p.id;
+      function statusLabel(status) {
+        return STATUSES.find((s) => s.value === status)?.label || status;
+      }
+
+      function ideaEditForm(p, isNew) {
         const status = p.status || "idea";
         const type = p.type || "fast";
-        const tasks = p.tasks || [];
-        const openCount = tasks.filter((t) => !t.done).length;
-        const score = scoreProject(p).toFixed(1);
         return `
-        <div class="idea-card" data-id="${p.id || ""}">
-          <div class="idea-card-head">
-            <div style="flex:1;min-width:0">
-              <h3>${isNew ? "New idea" : esc(p.name) || "Untitled"}</h3>
-              <div class="idea-meta">
-                ${p.id ? `<span class="pill">#${p.id}</span>` : ""}
-                <span class="pill">${esc(type)}</span>
-                <span class="pill">score ${score}</span>
-                <span class="pill">${openCount} open</span>
-              </div>
-            </div>
-            ${!isNew ? `<select data-k="status" style="width:auto;min-width:110px" onchange="markDirty(this)">${statusOpts(status)}</select>` : ""}
-          </div>
-          <div class="row">
-            <div class="field">
-              <label>Type</label>
-              <select data-k="type" onchange="markDirty(this)">${typeOpts(type)}</select>
-            </div>
-            <div class="field">
-              <label>Client</label>
-              <input data-k="client" value="${esc(p.client)}" placeholder="Client name (optional)" oninput="markDirty(this)" />
-            </div>
-          </div>
           <div class="field" style="margin-bottom:0">
             <label>Title</label>
             <input data-k="name" value="${esc(p.name)}" placeholder="What project are you moving?" oninput="markDirty(this)" />
@@ -2149,7 +2379,20 @@
             <label>Description</label>
             <textarea data-k="notes" placeholder="What is it, who is it for, and why does it matter?" oninput="markDirty(this)">${esc(p.notes)}</textarea>
           </div>
-          ${isNew ? `<div class="field"><label>Status</label><select data-k="status">${statusOpts(status)}</select></div>` : ""}
+          <div class="row">
+            <div class="field">
+              <label>Type</label>
+              <select data-k="type" onchange="markDirty(this)">${typeOpts(type)}</select>
+            </div>
+            <div class="field">
+              <label>Status</label>
+              <select data-k="status" onchange="markDirty(this)">${statusOpts(status)}</select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Client</label>
+            <input data-k="client" value="${esc(p.client)}" placeholder="Client name (optional)" oninput="markDirty(this)" />
+          </div>
           <div class="row-3">
             <div class="field"><label>Revenue 1-5</label><input data-k="revenue_potential" type="number" min="1" max="5" value="${esc(p.revenue_potential ?? 3)}" oninput="markDirty(this)" /></div>
             <div class="field"><label>Confidence 1-5</label><input data-k="confidence" type="number" min="1" max="5" value="${esc(p.confidence ?? 3)}" oninput="markDirty(this)" /></div>
@@ -2159,32 +2402,116 @@
             <div class="field"><label>Effort remaining (hrs)</label><input data-k="effort_remaining" type="number" min="1" value="${esc(p.effort_remaining ?? 8)}" oninput="markDirty(this)" /></div>
             <div class="field"><label>Deadline</label><input data-k="deadline" type="date" value="${esc(p.deadline)}" onchange="markDirty(this)" /></div>
           </div>
-          <div class="task-section">
-            <div class="task-section-head">
-              <label>Tasks</label>
-              ${!isNew ? '<button type="button" class="task-bulk-toggle" onclick="toggleBulkTasks(' + p.id + ')">Paste multiple</button>' : ""}
-            </div>
-            ${isNew ? '<p class="muted" style="font-size:13px;margin:0 0 10px">Save the idea first, then add tasks.</p>' : `<div class="task-list-host">${tasks.length ? renderTaskList(p.id, tasks) : '<p class="muted" style="font-size:13px;margin:0">No tasks yet — add one below, paste multiple lines, or ask AI to suggest some.</p>'}</div>`}
-            ${!isNew ? `
-            <div id="task-bulk-${p.id}" class="task-bulk-area hidden">
-              <div class="field" style="margin-bottom:8px">
-                <textarea id="task-bulk-input-${p.id}" placeholder="One task per line…"></textarea>
-              </div>
-              <button onclick="addBulkTasks(${p.id})">Add all lines</button>
-            </div>
-            <div class="task-add-row">
-              <input id="task-input-${p.id}" placeholder="Add a task…" onkeydown="taskInputKeydown(event, ${p.id})" />
-              <button onclick="addTask(${p.id})">Add</button>
-            </div>
-            <div id="suggest-${p.id}"></div>` : ""}
-          </div>
           <div class="idea-actions">
             <button class="primary" onclick="saveProject(this)">${isNew ? "Create idea" : "Save"}</button>
-            ${!isNew ? `<button onclick="suggestTasks(${p.id})">Suggest tasks</button>` : ""}
+            ${!isNew ? `<button class="ghost" onclick="toggleIdeaEdit(${p.id}, false)">Cancel</button>` : ""}
             <span class="spacer"></span>
             <button class="danger" onclick="${isNew ? "removeNewCard(this)" : "deleteProject(this)"}">${isNew ? "Discard" : "Delete"}</button>
+          </div>`;
+      }
+
+      const expandedTaskCards = new Set();
+
+      function projectCard(p) {
+        const isNew = !p.id;
+        if (isNew) {
+          return `
+          <div class="idea-card" data-id="">
+            <div class="idea-card-head">
+              <div style="flex:1;min-width:0"><h3>New idea</h3></div>
+            </div>
+            ${ideaEditForm(p, true)}
+            <p class="muted" style="font-size:12.5px;margin:12px 0 0">Save the idea first, then add tasks.</p>
+          </div>`;
+        }
+
+        const status = p.status || "idea";
+        const type = p.type || "fast";
+        const tasks = p.tasks || [];
+        const openCount = tasks.filter((t) => !t.done).length;
+        const doneCount = tasks.length - openCount;
+        const pct = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
+        const score = scoreProject(p).toFixed(1);
+        const next = projectAction(p);
+        const tasksOpen = expandedTaskCards.has(p.id);
+
+        return `
+        <div class="idea-card ${status === "archived" ? "archived" : ""}" data-id="${p.id}">
+          <div class="idea-view">
+            <div class="idea-card-head">
+              <div style="flex:1;min-width:0">
+                <h3>${esc(p.name) || "Untitled"}</h3>
+                <div class="idea-meta">
+                  <span class="pill status-${status}">${esc(statusLabel(status))}</span>
+                  <span class="pill type-${type}">${esc(type)}</span>
+                  <span class="pill">score ${score}</span>
+                  ${p.client ? `<span class="pill">${esc(p.client)}</span>` : ""}
+                  ${p.deadline ? `<span class="pill">due ${esc(p.deadline)}</span>` : ""}
+                </div>
+              </div>
+              <button type="button" class="icon-btn" title="Edit details" onclick="toggleIdeaEdit(${p.id}, true)"><svg><use href="#icon-edit"/></svg></button>
+            </div>
+            <p class="idea-next ${next ? "" : "empty"}" id="idea-next-${p.id}">
+              <span class="next-label">Next</span>
+              <span class="next-text">${next ? esc(next) : "No open task — add one below."}</span>
+            </p>
+            ${`<div class="idea-progress" id="idea-progress-${p.id}" ${tasks.length ? "" : 'style="display:none"'}>
+              <div class="idea-progress-track"><div class="idea-progress-fill" style="width:${pct}%"></div></div>
+              <span class="idea-progress-label">${doneCount}/${tasks.length}</span>
+            </div>`}
+            <button type="button" class="idea-tasks-toggle ${tasksOpen ? "open" : ""}" id="tasks-toggle-${p.id}" onclick="toggleIdeaTasks(${p.id})">
+              <span class="toggle-text">Tasks · ${openCount} open</span>
+              <span class="caret">▾</span>
+            </button>
+            <div id="tasks-wrap-${p.id}" class="idea-tasks-body ${tasksOpen ? "" : "hidden"}">
+              <div class="task-section" style="margin-top:0;padding-top:0;border-top:none">
+                <div class="task-section-head">
+                  <label>Tasks</label>
+                  <button type="button" class="task-bulk-toggle" onclick="toggleBulkTasks(${p.id})">Paste multiple</button>
+                </div>
+                <div class="task-list-host">${tasks.length ? renderTaskList(p.id, tasks) : '<p class="muted" style="font-size:13px;margin:0">No tasks yet — add one below, paste multiple lines, or ask AI to suggest some.</p>'}</div>
+                <div id="task-bulk-${p.id}" class="task-bulk-area hidden">
+                  <div class="field" style="margin-bottom:8px">
+                    <textarea id="task-bulk-input-${p.id}" placeholder="One task per line…"></textarea>
+                  </div>
+                  <button onclick="addBulkTasks(${p.id})">Add all lines</button>
+                </div>
+                <div class="task-add-row">
+                  <input id="task-input-${p.id}" placeholder="Add a task…" onkeydown="taskInputKeydown(event, ${p.id})" />
+                  <button onclick="addTask(${p.id})">Add</button>
+                </div>
+                <button type="button" style="margin-top:8px" onclick="suggestTasks(${p.id})">Suggest tasks with AI</button>
+                <div id="suggest-${p.id}"></div>
+              </div>
+            </div>
+          </div>
+          <div class="idea-edit hidden">
+            ${ideaEditForm(p, false)}
           </div>
         </div>`;
+      }
+
+      function toggleIdeaEdit(projectId, on) {
+        const card = document.querySelector(`.idea-card[data-id="${projectId}"]`);
+        if (!card) return;
+        if (!on) {
+          // Discard unsaved edits by re-rendering from cache.
+          renderProjects();
+          return;
+        }
+        card.querySelector(".idea-view").classList.add("hidden");
+        card.querySelector(".idea-edit").classList.remove("hidden");
+      }
+
+      function toggleIdeaTasks(projectId) {
+        const wrap = $("tasks-wrap-" + projectId);
+        const toggle = $("tasks-toggle-" + projectId);
+        if (!wrap) return;
+        const nowOpen = wrap.classList.contains("hidden");
+        wrap.classList.toggle("hidden", !nowOpen);
+        if (toggle) toggle.classList.toggle("open", nowOpen);
+        if (nowOpen) expandedTaskCards.add(projectId);
+        else expandedTaskCards.delete(projectId);
       }
 
       function markDirty() { /* visual-only; save is explicit */ }
@@ -2201,17 +2528,56 @@
         return (s ?? "").toString().replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
       }
 
+      let ideaFilter = "all";
+      let ideaSort = "score";
+
+      function setIdeaFilter(filter) {
+        ideaFilter = filter;
+        document.querySelectorAll("#idea-filter-chips .fchip").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.filter === filter);
+        });
+        renderProjects();
+      }
+
+      function setIdeaSort(sort) {
+        ideaSort = sort;
+        renderProjects();
+      }
+
+      function filterIdeas(list) {
+        if (ideaFilter === "all") return list.filter((p) => p.status !== "archived");
+        if (ideaFilter === "done") return list.filter((p) => p.status === "shipped" || p.status === "paid");
+        return list.filter((p) => p.status === ideaFilter);
+      }
+
+      function sortIdeas(list) {
+        const arr = [...list];
+        if (ideaSort === "newest") arr.sort((a, b) => (b.id || 0) - (a.id || 0));
+        else if (ideaSort === "name") arr.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+        else if (ideaSort === "deadline") arr.sort((a, b) => (a.deadline || "9999-12-31").localeCompare(b.deadline || "9999-12-31"));
+        else arr.sort((a, b) => scoreProject(b) - scoreProject(a));
+        return arr;
+      }
+
+      function renderProjects() {
+        const shown = sortIdeas(filterIdeas(cachedProjects));
+        $("projects-count").textContent =
+          shown.length === cachedProjects.length ? String(shown.length) : `${shown.length} of ${cachedProjects.length}`;
+        if (cachedProjects.length === 0) {
+          $("projects").innerHTML = '<div class="empty-state">No ideas yet — start with the fastest path to cash.</div>';
+        } else if (shown.length === 0) {
+          $("projects").innerHTML = '<div class="empty-state">Nothing here — try another filter.</div>';
+        } else {
+          $("projects").innerHTML = shown.map(projectCard).join("");
+        }
+      }
+
       async function loadProjects() {
         const list = await api("GET", "/projects");
         cachedProjects = list;
-        $("projects-count").textContent = list.length;
         updateFocusBanner(list);
         updateProjectSelects();
-        if (list.length === 0) {
-          $("projects").innerHTML = '<div class="empty-state">No projects yet — start with the fastest path to cash.</div>';
-        } else {
-          $("projects").innerHTML = list.map(projectCard).join("");
-        }
+        renderProjects();
       }
 
       function updateProjectSelects() {
@@ -2973,16 +3339,46 @@
 
       function goalCard(g) {
         const isNew = !g.id;
-        return `
-        <div class="goal" data-id="${g.id || ""}">
-          <div class="field"><label>Goal${g.id ? " #" + g.id : ""}</label><input data-k="title" value="${esc(g.title)}" placeholder="What are you aiming for?" /></div>
-          <div class="field"><label>Detail</label><textarea data-k="detail" placeholder="Why does this matter?">${esc(g.detail)}</textarea></div>
+        const form = `
+          <div class="field"><label>Goal</label><input data-k="title" value="${esc(g.title)}" placeholder="What are you aiming for?" /></div>
+          <div class="field"><label>Why it matters</label><textarea data-k="detail" placeholder="Why does this matter? What does done look like?">${esc(g.detail)}</textarea></div>
           <div class="card-actions">
-            <button class="primary" onclick="saveGoal(this)">${isNew ? "Create" : "Save"}</button>
+            <button class="primary" onclick="saveGoal(this)">${isNew ? "Create goal" : "Save"}</button>
+            ${!isNew ? `<button class="ghost" onclick="toggleGoalEdit(${g.id}, false)">Cancel</button>` : ""}
             <span class="spacer"></span>
             <button class="danger" onclick="${isNew ? "removeNewCard2(this)" : "deleteGoal(this)"}">${isNew ? "Discard" : "Delete"}</button>
+          </div>`;
+
+        if (isNew) {
+          return `<div class="goal" data-id="">${form}</div>`;
+        }
+
+        return `
+        <div class="goal" data-id="${g.id}">
+          <div class="goal-view">
+            <div class="goal-head">
+              <div class="goal-icon"><svg><use href="#icon-target"/></svg></div>
+              <div class="goal-body">
+                <h3>${esc(g.title) || "Untitled goal"}</h3>
+                ${g.detail ? `<p>${esc(g.detail)}</p>` : '<p class="muted" style="font-style:italic">No detail yet — what does done look like?</p>'}
+              </div>
+              <button type="button" class="icon-btn" title="Edit goal" onclick="toggleGoalEdit(${g.id}, true)"><svg><use href="#icon-edit"/></svg></button>
+            </div>
           </div>
+          <div class="goal-edit hidden">${form}</div>
         </div>`;
+      }
+
+      function toggleGoalEdit(goalId, on) {
+        const card = document.querySelector(`.goal[data-id="${goalId}"]`);
+        if (!card) return;
+        if (!on) {
+          loadGoals().catch((e) => toast(e.message, true));
+          return;
+        }
+        card.querySelector(".goal-view").classList.add("hidden");
+        card.querySelector(".goal-edit").classList.remove("hidden");
+        card.querySelector('[data-k="title"]')?.focus();
       }
 
       function removeNewCard2(btn) { btn.closest(".goal").remove(); }
@@ -3129,7 +3525,7 @@
         localStorage.removeItem("manoverboard_token");
         chatInited = false;
         chatHistory = [];
-        switchTab("manage");
+        switchTab("today");
         showLogin();
       }
 
@@ -3259,16 +3655,29 @@
       }
 
       function switchTab(name) {
-        const tabs = ["manage", "notes", "assistant", "settings"];
+        const tabs = ["today", "ideas", "goals", "clients", "notes", "assistant", "settings"];
+        if (!tabs.includes(name)) name = "today";
         tabs.forEach((t) => {
           $("tab-" + t).classList.toggle("hidden", t !== name);
           const btn = $("tabbtn-" + t);
           if (btn) btn.classList.toggle("active", t === name);
         });
-        document.querySelectorAll(".mobile-tabs .nav-item").forEach((btn, i) => {
-          btn.classList.toggle("active", tabs[i] === name);
+        document.querySelectorAll(".mobile-tabs .nav-item").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.tab === name);
         });
         updatePageHeader(name);
+        if (name === "today") {
+          Promise.all([loadProjects(), loadDailyLog()]).catch((e) => toast(e.message, true));
+        }
+        if (name === "ideas") {
+          loadProjects().catch((e) => toast(e.message, true));
+        }
+        if (name === "goals") {
+          loadGoals().catch((e) => toast(e.message, true));
+        }
+        if (name === "clients") {
+          loadContacts().catch((e) => toast(e.message, true));
+        }
         if (name === "notes") {
           loadMeetingNotes().catch((e) => toast(e.message, true));
           initRecordUI().catch(() => {});

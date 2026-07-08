@@ -312,6 +312,10 @@ Sign up with email/password. Each account has isolated projects, goals, and
 settings. The dashboard runs in the same process as the bot and shares Postgres,
 so edits show up immediately in `/today`, `/list`, etc.
 
+- **Navigation:** the dashboard is split into focused tabs — **Today** (focus
+  banner, stats, progress log), **Ideas** (projects with status filters, sort,
+  and compact cards that expand to a full editor), **Goals**, **Clients**
+  (contacts), **Call notes**, **Assistant**, and **Settings**.
 - **Auth:** `POST /api/auth/signup`, `POST /api/auth/login` return a bearer token.
   All `/api/*` data routes require `Authorization: Bearer <token>`.
 - **Settings tab:** per-user schedule (daily nudge, check-in, weekly review
