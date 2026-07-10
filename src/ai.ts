@@ -232,6 +232,45 @@ export function isAiConfigured(config: Config): boolean {
   return config.anthropicApiKey.length > 0;
 }
 
+/**
+ * Detect whether the latest user message is asking the assistant to mutate
+ * saved data (ideas, tasks, goals, memory, contacts, etc.).
+ *
+ * Used so clear "create/save/add" requests work even when the dashboard
+ * write checkbox was left unchecked — matching Telegram, which always allows writes.
+ */
+export function messageRequestsWrite(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (!t) return false;
+
+  // Short affirmations after the assistant proposed creating/saving something.
+  if (
+    /^(yes|yep|yeah|yup|ok|okay|sure|do it|go ahead|please do|sounds good|add (those|them|it)|save (those|them|it)|create (those|them|it))\b[.!]*$/.test(
+      t
+    )
+  ) {
+    return true;
+  }
+
+  const mutateVerbs =
+    /\b(add|create|save|store|capture|update|edit|rename|change|complete|finish|archive|ship|block|unblock)\b/;
+  const ideaNouns =
+    /\b(idea|ideas|project|projects|goal|goals|task|tasks|memory|memories|contact|contacts)\b/;
+
+  if (mutateVerbs.test(t) && ideaNouns.test(t)) return true;
+  if (/\b(draft|propose).{0,60}\b(and )?(save|add|create)\b/.test(t)) return true;
+  if (/\b(add this|save this|create this|log this|capture this|save it|add it)\b/.test(t)) {
+    return true;
+  }
+  if (/\b(i (finished|completed)|mark .{0,40}(done|complete)|log progress)\b/.test(t)) {
+    return true;
+  }
+  if (/\bremember (that|to|i)\b/.test(t)) return true;
+  if (/\bforget (that|this|memory)\b/.test(t)) return true;
+
+  return false;
+}
+
 function toNullableString(v: unknown): string | null {
   if (v === null || v === undefined) return null;
   const s = String(v).trim();
@@ -1230,8 +1269,12 @@ export async function chat(
   const system = await buildSystemPrompt(userId);
   const systemWithMode = `${system}\n\n# Mutation mode\n${
     options.allowWrite
-      ? "The user explicitly allowed writes for this request. Use tools only when the latest user message clearly asks to create or update data."
-      : "Read-only mode. Do not use tools or imply that you changed saved data in this reply."
+      ? [
+          "Writes are allowed for this request. When the latest user message asks to create, save, add, update, complete, remember, or otherwise change saved data, call the matching tool — do not only describe the change in text.",
+          "Treat phrases like 'add this project', 'save this idea', 'create a newsletter project', 'draft … and save it', 'yes / add those / sounds good' (after you proposed tasks or an idea), and 'remember that …' as write requests.",
+          "If the user only wants advice or a draft to review first (and did not ask to save), reply in text without tools.",
+        ].join(" ")
+      : "Read-only mode. Do not use tools or imply that you changed saved data in this reply. If they ask you to save something, tell them to allow saves (or rephrase with 'save/add/create') and try again."
   }`;
 
   while (rounds < MAX_TOOL_ROUNDS) {

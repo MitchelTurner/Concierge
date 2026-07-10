@@ -67,6 +67,7 @@ import {
   chat,
   isAiConfigured,
   liveMeetingAssist,
+  messageRequestsWrite,
   suggestTasksForProject,
   suggestTasksFromMeetingNote,
   type ChatMessage,
@@ -967,9 +968,11 @@ export function createServer(config: Config): express.Express {
       return res.status(400).json({ error: "no valid messages" });
     }
     try {
-      const result = await chat(config, req.userId!, messages, {
-        allowWrite: Boolean((req.body ?? {}).allow_write),
-      });
+      const lastUser = [...messages].reverse().find((m) => m.role === "user");
+      const allowWrite =
+        Boolean((req.body ?? {}).allow_write) ||
+        Boolean(lastUser && messageRequestsWrite(lastUser.content));
+      const result = await chat(config, req.userId!, messages, { allowWrite });
       res.json({ reply: result.reply, actions: result.actions });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

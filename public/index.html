@@ -2014,8 +2014,8 @@
                 <div class="chat-input-bar">
                   <textarea id="chat-text" placeholder="Ask about priorities, next actions, or say 'add this project'…"></textarea>
                   <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-2);margin:0 0 8px 2px">
-                    <input id="chat-allow-write" type="checkbox" />
-                    Allow the assistant to save changes for this message
+                    <input id="chat-allow-write" type="checkbox" checked />
+                    Allow the assistant to save changes (ideas, tasks, goals)
                   </label>
                   <button class="primary" id="chat-send" onclick="sendChat()">
                     <svg><use href="#icon-send"/></svg>
@@ -3739,10 +3739,10 @@
             return;
           }
           renderChatEmpty(
-            "Ask me to rank your projects, sharpen a next action, or draft new work before deciding whether to save it.",
+            "Ask me to rank your projects, sharpen a next action, or create a new idea and save it to Ideas.",
             [
               "Rank my fast projects and tell me what to do tonight.",
-              "I want to start a newsletter — draft the project and starter tasks.",
+              "Create a newsletter idea with starter tasks and save it.",
               "Sharpen the next action on my most urgent client project.",
             ]
           );
@@ -3794,7 +3794,10 @@
       async function sendChat() {
         const ta = $("chat-text");
         const text = ta.value.trim();
-        const allowWrite = $("chat-allow-write")?.checked || false;
+        const allowWriteEl = $("chat-allow-write");
+        // Keep the checkbox sticky; also treat clear create/save phrasing as a write.
+        const allowWrite =
+          Boolean(allowWriteEl?.checked) || messageLooksLikeWrite(text);
         if (!text) return;
         ta.value = "";
         appendMsg("user", text);
@@ -3809,9 +3812,13 @@
           chatHistory.push({ role: "assistant", content: data.reply });
           const actionNote = formatActions(data.actions);
           if (actionNote) appendMsg("system", actionNote);
-          if ($("chat-allow-write")) $("chat-allow-write").checked = false;
           if (data.actions?.length) {
             await Promise.all([loadGoals(), loadProjects()]);
+          } else if (allowWrite && messageLooksLikeWrite(text)) {
+            appendMsg(
+              "system",
+              "Nothing was saved to Ideas. Try a clearer ask like “create a newsletter idea and save it,” or check the save box and send again."
+            );
           }
         } catch (e) {
           thinking.remove();
@@ -3820,6 +3827,34 @@
           $("chat-send").disabled = false;
           $("chat-text").focus();
         }
+      }
+
+      /** Mirrors server-side messageRequestsWrite for UX hints and client allow_write. */
+      function messageLooksLikeWrite(text) {
+        const t = String(text || "").trim().toLowerCase();
+        if (!t) return false;
+        if (
+          /^(yes|yep|yeah|yup|ok|okay|sure|do it|go ahead|please do|sounds good|add (those|them|it)|save (those|them|it)|create (those|them|it))\b[.!]*$/.test(
+            t
+          )
+        ) {
+          return true;
+        }
+        const mutateVerbs =
+          /\b(add|create|save|store|capture|update|edit|rename|change|complete|finish|archive|ship|block|unblock)\b/;
+        const ideaNouns =
+          /\b(idea|ideas|project|projects|goal|goals|task|tasks|memory|memories|contact|contacts)\b/;
+        if (mutateVerbs.test(t) && ideaNouns.test(t)) return true;
+        if (/\b(draft|propose).{0,60}\b(and )?(save|add|create)\b/.test(t)) return true;
+        if (/\b(add this|save this|create this|log this|capture this|save it|add it)\b/.test(t)) {
+          return true;
+        }
+        if (/\b(i (finished|completed)|mark .{0,40}(done|complete)|log progress)\b/.test(t)) {
+          return true;
+        }
+        if (/\bremember (that|to|i)\b/.test(t)) return true;
+        if (/\bforget (that|this|memory)\b/.test(t)) return true;
+        return false;
       }
 
       $("chat-text")?.addEventListener("keydown", (e) => {
